@@ -3,6 +3,7 @@
 //! It does not download, install, execute package scripts, or mutate the host.
 
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 
 const MAX_CATALOG_PACKAGES: usize = 4_096;
@@ -37,6 +38,25 @@ pub struct Artifact {
     pub sha256: String,
 }
 
+impl Artifact {
+    /// Verify bytes against the canonical lowercase SHA-256 digest in metadata.
+    /// Callers must enforce a download-size limit before buffering an artifact.
+    pub fn verify_bytes(&self, bytes: &[u8]) -> Result<(), CatalogError> {
+        if !valid_digest(&self.sha256) {
+            return Err(CatalogError::InvalidDigest(self.file.clone()));
+        }
+        let actual = format!("{:x}", Sha256::digest(bytes));
+        if actual != self.sha256 {
+            return Err(CatalogError::ArtifactDigestMismatch {
+                file: self.file.clone(),
+                expected: self.sha256.clone(),
+                actual,
+            });
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CatalogError {
     UnsupportedSchema,
@@ -57,6 +77,11 @@ pub enum CatalogError {
     UnsupportedArchitecture(String),
     InvalidArtifactFile(String),
     InvalidDigest(String),
+    ArtifactDigestMismatch {
+        file: String,
+        expected: String,
+        actual: String,
+    },
     DuplicatePackage(String),
     DuplicateDependency {
         package: String,
@@ -470,6 +495,19 @@ mod tests {
         assert!(matches!(
             catalog.validate(),
             Err(CatalogError::DependencyDepthExceeded { .. })
+        ));
+    }
+
+    #[test]
+    fn artifact_bytes_are_verified_against_sha256() {
+        let artifact = Artifact {
+            file: "app.tar.zst".into(),
+            sha256: "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad".into(),
+        };
+        assert_eq!(artifact.verify_bytes(b"abc"), Ok(()));
+        assert!(matches!(
+            artifact.verify_bytes(b"tampered"),
+            Err(CatalogError::ArtifactDigestMismatch { .. })
         ));
     }
 
