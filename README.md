@@ -49,3 +49,13 @@ The Python command prints a plan only; it does not install software. Run the tes
 Signed/versioned repository metadata, trust roles, expiry and rollback protection, dependency/version constraints, file ownership and path safety, store immutability, transaction journaling, interruption recovery, license/provenance records, compatibility test fixtures and disposable-VM system tests must pass before this project is integrated into an installation image.
 
 The current validator is one component of that path, not evidence that a production package repository or installable Deku system exists.
+
+## Repository trust prototype (Rust)
+
+The new `crates/deku-pkg-trust` crate uses the maintained `tough` Rust client for TUF 1.0 metadata verification rather than implementing a custom signature/rollback protocol. Its current boundary requires a trusted root supplied out-of-band, HTTPS-only metadata/target base URLs, an existing persistent non-symlink datastore, safe metadata expiry, bounded metadata sizes, and target download into a caller-owned staging directory. TUF verifies the downloaded target against its authenticated metadata before `save_target` persists it.
+
+This is an integration prototype, not yet the default package-manager path:
+- It does not install packages, write the live root, or perform transactions.
+- The `tough 0.24.0` documentation states that delegated roles and TAP 4 multi-repository consensus are not implemented; Deku must not assume delegated repositories are supported.
+- Unit tests cover strict URL/target-name policy; a signed, local end-to-end TUF test repository and key rotation/rollback adversarial tests remain required before release.
+- The first trusted root must come from a reviewed out-of-band channel. Downloading the initial root from the same unauthenticated repository would defeat bootstrapping trust.
