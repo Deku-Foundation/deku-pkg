@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "checked_on": "2026-10-23",
+  "status": "research-only",
+  "architecture": "x86_64",
+  "preferred_track": "stable",
+  "candidates": {
+    "stable": {
+      "version": "7.2.12",
+      "release_type": "stable",
+      "source": "https://cdn.kernel.org/pub/linux/kernel/v7.x/linux-7.2.12.tar.xz",
+      "release_index": "https://www.kernel.org/",
+      "promoted": false
+    },
+    "longterm": {
+      "version": "6.18.58",
+      "release_type": "longterm",
+      "source": "https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.18.58.tar.xz",
+      "release_index": "https://kernel.org/releases.html",
+      "promoted": false
+    },
+    "mainline": {
+      "version": "7.3",
+      "release_type": "mainline",
+      "source": "https://cdn.kernel.org/pub/linux/kernel/v7.x/linux-7.3.tar.xz",
+      "release_index": "https://www.kernel.org/",
+      "promoted": false
+    }
+  },
+  "integrity": {
+    "sha256": null,
+    "signature_verified": false,
+    "build_tested": false,
+    "boot_tested": false,
+    "notes": "Do not package or publish from this snapshot until checksums, upstream signatures, build, and boot tests are recorded."
+  }
+}
