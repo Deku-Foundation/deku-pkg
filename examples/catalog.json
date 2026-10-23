@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "architecture": "x86_64",
+  "packages": [
+    {
+      "name": "libsample",
+      "version": "1.2.0",
+      "license": "MIT",
+      "architectures": ["x86_64"],
+      "dependencies": [],
+      "artifact": {
+        "filename": "libsample-1.2.0-x86_64.deku",
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "size_bytes": 4096
+      }
+    },
+    {
+      "name": "hello-deku",
+      "version": "1.0.0",
+      "license": "MIT",
+      "architectures": ["x86_64"],
+      "dependencies": ["libsample"],
+      "artifact": {
+        "filename": "hello-deku-1.0.0-x86_64.deku",
+        "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "size_bytes": 8192
+      }
+    }
+  ]
+}
