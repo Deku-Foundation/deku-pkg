@@ -33,6 +33,7 @@ pub enum TrustError {
         reason: &'static str,
     },
     InvalidTrustedRootPath,
+    TrustedRootEmpty,
     TrustedRootTooLarge {
         size: u64,
         limit: u64,
@@ -56,6 +57,7 @@ impl fmt::Display for TrustError {
                 f,
                 "trusted root metadata must be a regular, non-symlink file"
             ),
+            Self::TrustedRootEmpty => write!(f, "trusted root metadata must not be empty"),
             Self::TrustedRootTooLarge { size, limit } => {
                 write!(f, "trusted root metadata is {size} bytes; limit is {limit}")
             }
@@ -131,7 +133,10 @@ impl RepositoryConfig {
         if !root_metadata.file_type().is_file() || root_metadata.file_type().is_symlink() {
             return Err(TrustError::InvalidTrustedRootPath);
         }
-        if root_metadata.len() == 0 || root_metadata.len() > MAX_TRUSTED_ROOT_BYTES {
+        if root_metadata.len() == 0 {
+            return Err(TrustError::TrustedRootEmpty);
+        }
+        if root_metadata.len() > MAX_TRUSTED_ROOT_BYTES {
             return Err(TrustError::TrustedRootTooLarge {
                 size: root_metadata.len(),
                 limit: MAX_TRUSTED_ROOT_BYTES,
