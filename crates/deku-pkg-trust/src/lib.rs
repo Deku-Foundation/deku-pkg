@@ -399,7 +399,6 @@ mod tests {
     }
 }
 
-
 #[cfg(test)]
 mod signed_repository_fixture_tests {
     use super::*;
