@@ -18,9 +18,18 @@ jobs:
         uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           components: rustfmt, clippy
+      - name: Generate lockfile once when bootstrapping the workspace
+        run: test -f Cargo.lock || cargo generate-lockfile
       - name: Check formatting
         run: cargo fmt --all -- --check
       - name: Run Clippy with warnings denied
-        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+        run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
       - name: Run unit tests
-        run: cargo test --workspace
+        run: cargo test --locked --workspace
+      - name: Preserve the resolved lockfile for initial review
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: deku-pkg-cargo-lock-${{ github.run_id }}
+          path: Cargo.lock
+          if-no-files-found: error
+          retention-days: 7
