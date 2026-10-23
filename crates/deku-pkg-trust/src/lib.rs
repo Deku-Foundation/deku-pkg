@@ -24,14 +24,26 @@ const MAX_TARGET_NAME_BYTES: usize = 1024;
 /// Errors at the package-repository trust boundary.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TrustError {
-    InvalidUrl { field: &'static str, reason: String },
-    UnsafeBaseUrl { field: &'static str, reason: &'static str },
+    InvalidUrl {
+        field: &'static str,
+        reason: String,
+    },
+    UnsafeBaseUrl {
+        field: &'static str,
+        reason: &'static str,
+    },
     InvalidTrustedRootPath,
-    TrustedRootTooLarge { size: u64, limit: u64 },
+    TrustedRootTooLarge {
+        size: u64,
+        limit: u64,
+    },
     DatastoreUnavailable(String),
     InvalidTargetName(String),
     TargetNotFound(String),
-    Io { operation: &'static str, message: String },
+    Io {
+        operation: &'static str,
+        message: String,
+    },
     Tuf(String),
 }
 
@@ -40,13 +52,22 @@ impl fmt::Display for TrustError {
         match self {
             Self::InvalidUrl { field, reason } => write!(f, "{field} is invalid: {reason}"),
             Self::UnsafeBaseUrl { field, reason } => write!(f, "{field} is unsafe: {reason}"),
-            Self::InvalidTrustedRootPath => write!(f, "trusted root metadata must be a regular, non-symlink file"),
+            Self::InvalidTrustedRootPath => write!(
+                f,
+                "trusted root metadata must be a regular, non-symlink file"
+            ),
             Self::TrustedRootTooLarge { size, limit } => {
                 write!(f, "trusted root metadata is {size} bytes; limit is {limit}")
             }
-            Self::DatastoreUnavailable(reason) => write!(f, "TUF datastore is not usable: {reason}"),
-            Self::InvalidTargetName(name) => write!(f, "target name is not a safe relative path: {name}"),
-            Self::TargetNotFound(name) => write!(f, "trusted repository does not contain target: {name}"),
+            Self::DatastoreUnavailable(reason) => {
+                write!(f, "TUF datastore is not usable: {reason}")
+            }
+            Self::InvalidTargetName(name) => {
+                write!(f, "target name is not a safe relative path: {name}")
+            }
+            Self::TargetNotFound(name) => {
+                write!(f, "trusted repository does not contain target: {name}")
+            }
             Self::Io { operation, message } => write!(f, "{operation} failed: {message}"),
             Self::Tuf(message) => write!(f, "TUF verification failed: {message}"),
         }
@@ -213,12 +234,13 @@ impl TrustedRepository {
                 "target staging path must be an existing non-symlink directory".into(),
             ));
         }
-        let canonical_output = tokio::fs::canonicalize(output_directory)
-            .await
-            .map_err(|error| TrustError::Io {
-                operation: "canonicalize target staging directory",
-                message: error.to_string(),
-            })?;
+        let canonical_output =
+            tokio::fs::canonicalize(output_directory)
+                .await
+                .map_err(|error| TrustError::Io {
+                    operation: "canonicalize target staging directory",
+                    message: error.to_string(),
+                })?;
 
         self.inner
             .save_target(&target, &canonical_output, Prefix::None)
@@ -283,38 +305,85 @@ mod tests {
 
     #[test]
     fn accepts_https_repository_bases() {
-        assert!(parse_https_base("metadata_base_url", "https://packages.example.invalid/metadata/").is_ok());
-        assert!(parse_https_base("targets_base_url", "https://packages.example.invalid/targets/").is_ok());
+        assert!(
+            parse_https_base(
+                "metadata_base_url",
+                "https://packages.example.invalid/metadata/"
+            )
+            .is_ok()
+        );
+        assert!(
+            parse_https_base(
+                "targets_base_url",
+                "https://packages.example.invalid/targets/"
+            )
+            .is_ok()
+        );
     }
 
     #[test]
     fn rejects_plain_http() {
-        let result = parse_https_base("metadata_base_url", "http://packages.example.invalid/metadata/");
+        let result = parse_https_base(
+            "metadata_base_url",
+            "http://packages.example.invalid/metadata/",
+        );
         assert!(matches!(result, Err(TrustError::UnsafeBaseUrl { .. })));
     }
 
     #[test]
     fn rejects_embedded_credentials() {
-        let result = parse_https_base("metadata_base_url", "https://user:pass@packages.example.invalid/metadata/");
+        let result = parse_https_base(
+            "metadata_base_url",
+            "https://user:pass@packages.example.invalid/metadata/",
+        );
         assert!(matches!(result, Err(TrustError::UnsafeBaseUrl { .. })));
     }
 
     #[test]
     fn rejects_query_and_fragment() {
-        assert!(parse_https_base("metadata_base_url", "https://packages.example.invalid/metadata/?token=x").is_err());
-        assert!(parse_https_base("metadata_base_url", "https://packages.example.invalid/metadata/#latest").is_err());
+        assert!(
+            parse_https_base(
+                "metadata_base_url",
+                "https://packages.example.invalid/metadata/?token=x"
+            )
+            .is_err()
+        );
+        assert!(
+            parse_https_base(
+                "metadata_base_url",
+                "https://packages.example.invalid/metadata/#latest"
+            )
+            .is_err()
+        );
     }
 
     #[test]
     fn requires_directory_style_base_urls() {
-        let result = parse_https_base("metadata_base_url", "https://packages.example.invalid/metadata");
+        let result = parse_https_base(
+            "metadata_base_url",
+            "https://packages.example.invalid/metadata",
+        );
         assert!(matches!(result, Err(TrustError::UnsafeBaseUrl { .. })));
     }
 
     #[test]
     fn rejects_traversal_and_absolute_target_paths() {
-        for name in ["", "../escape.rpm", "packages/../escape.rpm", "/absolute/path.rpm", "a//b.rpm", "a/./b.rpm", r"a\b.rpm"] {
-            assert!(matches!(validate_target_name(name), Err(TrustError::InvalidTargetName(_))), "accepted unsafe target {name:?}");
+        for name in [
+            "",
+            "../escape.rpm",
+            "packages/../escape.rpm",
+            "/absolute/path.rpm",
+            "a//b.rpm",
+            "a/./b.rpm",
+            r"a\b.rpm",
+        ] {
+            assert!(
+                matches!(
+                    validate_target_name(name),
+                    Err(TrustError::InvalidTargetName(_))
+                ),
+                "accepted unsafe target {name:?}"
+            );
         }
     }
 
