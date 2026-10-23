@@ -106,3 +106,15 @@ Use safe Rust by default. Any required unsafe code must be isolated, justified, 
 8. **Desktop:** Flatpak integration and KDE Discover experience only after CLI/store/transaction invariants are tested.
 
 No ISO should depend on this manager until clean install, upgrade, interrupted transaction, rollback, package removal, kernel recovery, and VM boot tests pass.
+
+## TUF integration prototype
+
+The workspace now contains `crates/deku-pkg-trust`, which wraps the maintained `tough 0.24.0` TUF client. The wrapper keeps the package model/dependency solver separate from network and trust operations. It requires:
+- an out-of-band trusted root metadata file;
+- HTTPS-only metadata and target endpoints without credentials, query strings or fragments;
+- an existing persistent non-symlink datastore so TUF can remember previously trusted timestamp/snapshot/targets metadata versions;
+- TUF safe expiration enforcement (never silently bypassed in production);
+- bounded root, timestamp, snapshot and targets metadata;
+- verified target saving into an existing staging directory, separate from installation.
+
+This does **not** make the package manager production-ready. The chosen `tough` version documents that delegated roles and TAP 4 multi-repository consensus are not yet supported. The wrapper currently operates on top-level targets only. Before this becomes a supported package repository client, add checked-in/local signed repository fixtures, end-to-end tests for signatures/expiry/rollback/rotation/tampering, explicit repository bootstrap/key-recovery procedures, and a reviewed Cargo dependency lockfile. No live-system install or update is implemented.
