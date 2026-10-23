@@ -1,0 +1,28 @@
+name: Kernel metadata checks
+
+on:
+  pull_request:
+    paths:
+      - "kernel/**"
+      - "scripts/check-kernel-metadata.py"
+      - ".github/workflows/kernel-metadata-check.yml"
+  push:
+    branches: [main]
+    paths:
+      - "kernel/**"
+      - "scripts/check-kernel-metadata.py"
+      - ".github/workflows/kernel-metadata-check.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Validate kernel tracking metadata
+        run: python3 scripts/check-kernel-metadata.py
