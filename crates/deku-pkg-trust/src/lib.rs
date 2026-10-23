@@ -398,3 +398,113 @@ mod tests {
         assert!(validate_target_name("packages/hello-1.0.x86_64.rpm").is_ok());
     }
 }
+
+
+#[cfg(test)]
+mod signed_repository_fixture_tests {
+    use super::*;
+    use std::fs;
+    use tempfile::tempdir;
+
+    fn upstream_fixture() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests")
+            .join("fixtures")
+            .join("tuf-reference-impl")
+    }
+
+    fn local_fixture_config(repository_dir: &Path, datastore: &Path) -> RepositoryConfig {
+        let metadata_dir = repository_dir.join("metadata");
+        let targets_dir = repository_dir.join("targets");
+        RepositoryConfig {
+            trusted_root_path: metadata_dir.join("1.root.json"),
+            metadata_base_url: Url::from_directory_path(metadata_dir)
+                .expect("metadata directory should convert to file URL"),
+            targets_base_url: Url::from_directory_path(targets_dir)
+                .expect("targets directory should convert to file URL"),
+            datastore_path: datastore.to_path_buf(),
+        }
+    }
+
+    fn copy_directory(source: &Path, destination: &Path) -> std::io::Result<()> {
+        fs::create_dir_all(destination)?;
+        for entry in fs::read_dir(source)? {
+            let entry = entry?;
+            let file_type = entry.file_type()?;
+            let from = entry.path();
+            let to = destination.join(entry.file_name());
+            if file_type.is_dir() {
+                copy_directory(&from, &to)?;
+            } else if file_type.is_file() {
+                fs::copy(from, to)?;
+            } else {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "fixture contains an unexpected non-file entry",
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn loads_signed_reference_metadata_and_downloads_a_verified_target() {
+        let temporary = tempdir().expect("temporary directory");
+        let datastore = temporary.path().join("datastore");
+        let staging = temporary.path().join("staging");
+        fs::create_dir(&datastore).unwrap();
+        fs::create_dir(&staging).unwrap();
+
+        let trusted = local_fixture_config(&upstream_fixture(), &datastore)
+            .load()
+            .await
+            .expect("signed, unexpired reference metadata should load");
+
+        assert!(
+            trusted.target_count() >= 2,
+            "fixture should expose the two top-level signed targets"
+        );
+
+        let downloaded = trusted
+            .download_verified_target("file1.txt", &staging)
+            .await
+            .expect("target bytes matching signed TUF metadata should be saved");
+        assert_eq!(
+            fs::read_to_string(downloaded).unwrap(),
+            "This is an example target file."
+        );
+    }
+
+    #[tokio::test]
+    async fn rejects_target_bytes_that_do_not_match_signed_metadata() {
+        let temporary = tempdir().expect("temporary directory");
+        let repository_copy = temporary.path().join("repository");
+        let datastore = temporary.path().join("datastore");
+        let staging = temporary.path().join("staging");
+        copy_directory(&upstream_fixture(), &repository_copy).unwrap();
+        fs::write(
+            repository_copy.join("targets").join("file1.txt"),
+            b"tampered target bytes",
+        )
+        .unwrap();
+        fs::create_dir(&datastore).unwrap();
+        fs::create_dir(&staging).unwrap();
+
+        let trusted = local_fixture_config(&repository_copy, &datastore)
+            .load()
+            .await
+            .expect("metadata remains correctly signed; only target bytes were altered");
+
+        let result = trusted
+            .download_verified_target("file1.txt", &staging)
+            .await;
+        assert!(
+            matches!(result, Err(TrustError::Tuf(_))),
+            "modified target must fail signed length/digest verification, got {result:?}"
+        );
+        assert!(
+            !staging.join("file1.txt").exists(),
+            "an unverified target must not be persisted to the staging destination"
+        );
+    }
+}
