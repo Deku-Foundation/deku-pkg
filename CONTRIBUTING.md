@@ -12,6 +12,15 @@ This repository is not yet a production package repository. Contributions should
 - Identify whether the package runs code during build or installation, and what privileges it needs.
 - Include basic test and verification steps.
 
+## Branch workflow
+
+- Use `dev` for integration and validation; use `main` as the reviewed baseline.
+- Run the Rust formatting, Clippy, tests, and package-planner validation on `dev`.
+- Open a pull request from `dev` to `main` only after checks pass.
+- Keep long-lived branches to `main` and `dev`; use a fork for independent contributor work when needed.
+
+The foundation-wide policy is documented in [CONTRIBUTING.md](https://github.com/Deku-Foundation/Deku-Foundation.github.io/blob/main/CONTRIBUTING.md) and [ENGINEERING_WORKFLOW.md](https://github.com/Deku-Foundation/Deku-Foundation.github.io/blob/main/ENGINEERING_WORKFLOW.md).
+
 ## Review requirements
 
 A package change should include enough metadata for another maintainer to reproduce the review. Do not accept a package merely because it builds on one developer's machine.
