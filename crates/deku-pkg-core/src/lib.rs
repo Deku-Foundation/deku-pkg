@@ -59,13 +59,16 @@ impl Artifact {
         let mut total = 0_u64;
 
         loop {
-            let read =
-                reader
-                    .read(&mut buffer)
-                    .map_err(|error| CatalogError::ArtifactReadError {
-                        file: self.file.clone(),
-                        message: error.to_string(),
-                    })?;
+            // Read no more than the remaining allowance plus one byte. That
+            // single extra byte is sufficient to prove that the stream is too large.
+            let remaining = max_bytes.saturating_sub(total);
+            let read_limit = remaining.saturating_add(1).min(buffer.len() as u64) as usize;
+            let read = reader.read(&mut buffer[..read_limit]).map_err(|error| {
+                CatalogError::ArtifactReadError {
+                    file: self.file.clone(),
+                    message: error.to_string(),
+                }
+            })?;
             if read == 0 {
                 break;
             }
@@ -667,6 +670,25 @@ mod tests {
                 limit: 2
             }) if file == "app.tar.zst"
         ));
+    }
+
+    #[test]
+    fn streaming_verifier_reads_at_most_one_byte_past_limit() {
+        let artifact = Artifact {
+            file: "large.tar.zst".into(),
+            sha256: "a".repeat(64),
+        };
+        let data = vec![b'x'; 100_000];
+        let mut reader = std::io::Cursor::new(data);
+        assert!(matches!(
+            artifact.verify_reader(&mut reader, 2),
+            Err(CatalogError::ArtifactTooLarge {
+                size: 3,
+                limit: 2,
+                ..
+            })
+        ));
+        assert_eq!(reader.position(), 3);
     }
 
     #[test]
