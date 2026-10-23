@@ -63,12 +63,12 @@ impl Artifact {
             // single extra byte is sufficient to prove that the stream is too large.
             let remaining = max_bytes.saturating_sub(total);
             let read_limit = remaining.saturating_add(1).min(buffer.len() as u64) as usize;
-            let read = reader
-                .read(&mut buffer[..read_limit])
-                .map_err(|error| CatalogError::ArtifactReadError {
+            let read = reader.read(&mut buffer[..read_limit]).map_err(|error| {
+                CatalogError::ArtifactReadError {
                     file: self.file.clone(),
                     message: error.to_string(),
-                })?;
+                }
+            })?;
             if read == 0 {
                 break;
             }
