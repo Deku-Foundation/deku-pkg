@@ -40,13 +40,57 @@ pub struct Artifact {
 }
 
 impl Artifact {
-    /// Verify bytes against the canonical lowercase SHA-256 digest in metadata.
-    /// Callers must enforce a download-size limit before buffering an artifact.
-    pub fn verify_bytes(&self, bytes: &[u8]) -> Result<(), CatalogError> {
+    /// Verify a stream of artifact bytes without buffering the whole package.
+    ///
+    /// `max_bytes` must come from the caller's download/storage policy. The
+    /// verifier reads at most one 64 KiB chunk beyond neither the configured
+    /// byte limit nor the bytes needed to prove that the artifact is oversized.
+    pub fn verify_reader<R: std::io::Read>(
+        &self,
+        mut reader: R,
+        max_bytes: u64,
+    ) -> Result<u64, CatalogError> {
         if !valid_digest(&self.sha256) {
             return Err(CatalogError::InvalidDigest(self.file.clone()));
         }
-        let actual = format!("{:x}", Sha256::digest(bytes));
+
+        let mut hasher = Sha256::new();
+        let mut buffer = [0_u8; 64 * 1024];
+        let mut total = 0_u64;
+
+        loop {
+            let read =
+                reader
+                    .read(&mut buffer)
+                    .map_err(|error| CatalogError::ArtifactReadError {
+                        file: self.file.clone(),
+                        message: error.to_string(),
+                    })?;
+            if read == 0 {
+                break;
+            }
+
+            let next_total =
+                total
+                    .checked_add(read as u64)
+                    .ok_or_else(|| CatalogError::ArtifactTooLarge {
+                        file: self.file.clone(),
+                        size: u64::MAX,
+                        limit: max_bytes,
+                    })?;
+            if next_total > max_bytes {
+                return Err(CatalogError::ArtifactTooLarge {
+                    file: self.file.clone(),
+                    size: next_total,
+                    limit: max_bytes,
+                });
+            }
+
+            hasher.update(&buffer[..read]);
+            total = next_total;
+        }
+
+        let actual = format!("{:x}", hasher.finalize());
         if actual != self.sha256 {
             return Err(CatalogError::ArtifactDigestMismatch {
                 file: self.file.clone(),
@@ -54,7 +98,13 @@ impl Artifact {
                 actual,
             });
         }
-        Ok(())
+        Ok(total)
+    }
+
+    /// Verify a byte slice against the canonical lowercase SHA-256 digest.
+    pub fn verify_bytes(&self, bytes: &[u8]) -> Result<(), CatalogError> {
+        self.verify_reader(std::io::Cursor::new(bytes), bytes.len() as u64)
+            .map(|_| ())
     }
 }
 
@@ -87,6 +137,15 @@ pub enum CatalogError {
         file: String,
         expected: String,
         actual: String,
+    },
+    ArtifactTooLarge {
+        file: String,
+        size: u64,
+        limit: u64,
+    },
+    ArtifactReadError {
+        file: String,
+        message: String,
     },
     DuplicatePackage(String),
     DuplicateDependency {
@@ -578,6 +637,66 @@ mod tests {
         assert_eq!(artifact.verify_bytes(b"abc"), Ok(()));
         assert!(matches!(
             artifact.verify_bytes(b"tampered"),
+            Err(CatalogError::ArtifactDigestMismatch { .. })
+        ));
+    }
+
+    #[test]
+    fn streaming_verifier_accepts_valid_bytes_within_limit() {
+        let artifact = Artifact {
+            file: "app.tar.zst".into(),
+            sha256: "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad".into(),
+        };
+        assert_eq!(
+            artifact.verify_reader(std::io::Cursor::new(b"abc"), 3),
+            Ok(3)
+        );
+    }
+
+    #[test]
+    fn streaming_verifier_rejects_artifact_over_size_limit() {
+        let artifact = Artifact {
+            file: "app.tar.zst".into(),
+            sha256: "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad".into(),
+        };
+        assert!(matches!(
+            artifact.verify_reader(std::io::Cursor::new(b"abc"), 2),
+            Err(CatalogError::ArtifactTooLarge {
+                file,
+                size: 3,
+                limit: 2
+            }) if file == "app.tar.zst"
+        ));
+    }
+
+    #[test]
+    fn streaming_verifier_reports_reader_errors() {
+        struct BrokenReader;
+
+        impl std::io::Read for BrokenReader {
+            fn read(&mut self, _buffer: &mut [u8]) -> std::io::Result<usize> {
+                Err(std::io::Error::other("fixture read error"))
+            }
+        }
+
+        let artifact = Artifact {
+            file: "app.tar.zst".into(),
+            sha256: "a".repeat(64),
+        };
+        assert!(matches!(
+            artifact.verify_reader(BrokenReader, 1024),
+            Err(CatalogError::ArtifactReadError { .. })
+        ));
+    }
+
+    #[test]
+    fn streaming_verifier_checks_digest_after_reading() {
+        let artifact = Artifact {
+            file: "app.tar.zst".into(),
+            sha256: "a".repeat(64),
+        };
+        assert!(matches!(
+            artifact.verify_reader(std::io::Cursor::new(b"abc"), 3),
             Err(CatalogError::ArtifactDigestMismatch { .. })
         ));
     }
