@@ -7,7 +7,7 @@ on:
       - "scripts/check-kernel-metadata.py"
       - ".github/workflows/kernel-metadata-check.yml"
   push:
-    branches: [main]
+    branches: [main, dev]
     paths:
       - "kernel/**"
       - "scripts/check-kernel-metadata.py"
