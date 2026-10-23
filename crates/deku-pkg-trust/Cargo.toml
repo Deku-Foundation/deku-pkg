@@ -1,0 +1,11 @@
+[package]
+name = "deku-pkg-trust"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "TUF-backed repository metadata and artifact verification for Deku"
+
+[dependencies]
+tough = { version = "=0.24.0", features = ["http"] }
+tokio = { version = "1", features = ["fs"] }
+url = "2"
