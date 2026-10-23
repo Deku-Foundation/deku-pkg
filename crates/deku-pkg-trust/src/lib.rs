@@ -39,6 +39,9 @@ pub enum TrustError {
         limit: u64,
     },
     DatastoreUnavailable(String),
+    UnsafeDirectoryPermissions {
+        field: &'static str,
+    },
     InvalidTargetName(String),
     TargetNotFound(String),
     Io {
@@ -64,6 +67,10 @@ impl fmt::Display for TrustError {
             Self::DatastoreUnavailable(reason) => {
                 write!(f, "TUF datastore is not usable: {reason}")
             }
+            Self::UnsafeDirectoryPermissions { field } => write!(
+                f,
+                "{field} must not be group- or world-writable; metadata rollback state must be protected"
+            ),
             Self::InvalidTargetName(name) => {
                 write!(f, "target name is not a safe relative path: {name}")
             }
@@ -157,6 +164,7 @@ impl RepositoryConfig {
                 "path must be an existing non-symlink directory".into(),
             ));
         }
+        ensure_private_directory(&datastore_metadata, "datastore_path")?;
         let datastore = tokio::fs::canonicalize(&self.datastore_path)
             .await
             .map_err(|error| TrustError::DatastoreUnavailable(error.to_string()))?;
@@ -239,6 +247,7 @@ impl TrustedRepository {
                 "target staging path must be an existing non-symlink directory".into(),
             ));
         }
+        ensure_private_directory(&output_type, "target staging directory")?;
         let canonical_output =
             tokio::fs::canonicalize(output_directory)
                 .await
@@ -254,6 +263,30 @@ impl TrustedRepository {
 
         Ok(canonical_output.join(target.resolved()))
     }
+}
+
+/// Refuse directories writable by other local users. TUF's persistent datastore
+/// contains anti-rollback state, so an untrusted user must not be able to replace
+/// or delete its metadata. The same rule applies to a directory receiving
+/// verified package bytes. Callers must also protect ancestor directories.
+#[cfg(unix)]
+fn ensure_private_directory(
+    metadata: &std::fs::Metadata,
+    field: &'static str,
+) -> Result<(), TrustError> {
+    use std::os::unix::fs::PermissionsExt;
+    if metadata.permissions().mode() & 0o022 != 0 {
+        return Err(TrustError::UnsafeDirectoryPermissions { field });
+    }
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn ensure_private_directory(
+    _metadata: &std::fs::Metadata,
+    _field: &'static str,
+) -> Result<(), TrustError> {
+    Ok(())
 }
 
 fn parse_https_base(field: &'static str, value: &str) -> Result<Url, TrustError> {
@@ -472,6 +505,60 @@ mod signed_repository_fixture_tests {
             fs::read_to_string(downloaded).unwrap(),
             "This is an example target file."
         );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn rejects_group_or_world_writable_tuf_datastore() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temporary = tempdir().expect("temporary directory");
+        let datastore = temporary.path().join("datastore");
+        fs::create_dir(&datastore).unwrap();
+        fs::set_permissions(&datastore, fs::Permissions::from_mode(0o777)).unwrap();
+
+        let config = local_fixture_config(&upstream_fixture(), &datastore);
+        let result = config.load().await;
+        assert!(
+            matches!(
+                result,
+                Err(TrustError::UnsafeDirectoryPermissions {
+                    field: "datastore_path"
+                })
+            ),
+            "shared-writable rollback state must be rejected, got {result:?}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn rejects_group_or_world_writable_target_staging_directory() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temporary = tempdir().expect("temporary directory");
+        let datastore = temporary.path().join("datastore");
+        let staging = temporary.path().join("staging");
+        fs::create_dir(&datastore).unwrap();
+        fs::create_dir(&staging).unwrap();
+        fs::set_permissions(&staging, fs::Permissions::from_mode(0o777)).unwrap();
+
+        let repository = local_fixture_config(&upstream_fixture(), &datastore)
+            .load()
+            .await
+            .expect("signed local fixture should load");
+        let result = repository
+            .download_verified_target("file1.txt", &staging)
+            .await;
+        assert!(
+            matches!(
+                result,
+                Err(TrustError::UnsafeDirectoryPermissions {
+                    field: "target staging directory"
+                })
+            ),
+            "shared-writable target path must be rejected, got {result:?}"
+        );
+        assert!(!staging.join("file1.txt").exists());
     }
 
     #[tokio::test]
