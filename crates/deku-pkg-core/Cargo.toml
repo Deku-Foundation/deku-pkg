@@ -8,5 +8,6 @@ description = "Experimental metadata validation and deterministic dependency pla
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+sha2 = "0.10"
 
 [dev-dependencies]
