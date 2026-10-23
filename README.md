@@ -1,29 +1,51 @@
 # Deku Package System
 
-Deku's package system is a project to develop native package metadata, repository integrity, dependency planning, and safe transactions designed around Deku's requirements.
+Deku's package system is being developed as a native, Rust-based package manager with explicit package metadata, repository trust, dependency planning and recoverable transactions. The project separates recipe review, build execution, repository publication and client-side installation so that each trust boundary can be tested independently.
 
 ## Status
 
-**Experimental plan-only prototype.** The current branch validates a local fixture catalog and computes a deterministic dependency order. It does not download, authenticate, build, install, update, or remove software. No production package catalog is available.
+**Experimental prototype — not a production package manager.** The repository has a metadata-only Python plan/catalog prototype and a Rust core that validates a bounded catalog, plans dependency order deterministically and checks artifact bytes against recorded SHA-256 digests. The Rust core does not fetch artifacts, authenticate repository publishers, unpack packages, execute scripts, install software, mutate the host or implement transaction recovery. No production repository or supported system package catalog is available.
 
-## Current prototype
+## Current prototype layout
 
-- `deku_pkg/catalog.py` — strict local catalog validation.
-- `deku_pkg/planner.py` — deterministic dependency-first planning with missing-dependency and cycle detection.
-- `deku_pkg/cli.py` — plan-only command-line interface.
-- `examples/catalog.json` — illustrative fixture catalog.
-- `docs/prototype-v0.md` — scope, trust boundaries, and next gates.
+- `deku_pkg/` — original Python plan/catalog prototype and command-line entry point.
+- `crates/deku-pkg-core/` — Rust metadata model, bounded JSON parser, semantic validator, deterministic dependency planner and artifact-digest verifier.
+- `docs/prototype-v0.md` — initial prototype scope and acceptance gates.
+- `docs/native-store-and-transactions.md` — proposed immutable store, repository trust, transaction states and compatibility policy.
+- `examples/catalog.json` — illustrative Python prototype catalog.
 
-Example:
+The Rust core has no root privileges or host mutation APIs. Its streaming artifact verifier checks data integrity against the digest recorded in metadata; SHA-256 alone does not authenticate the repository publisher. A signed repository format, authenticated metadata freshness, key rotation/revocation, and the network client are not implemented yet.
+
+## Run checks
+
+Rust core tests and lint checks:
+
+```sh
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets --all-features -- -D warnings
+cargo test --workspace
+```
+
+The Python prototype may be validated with:
 
 ```sh
 PYTHONPATH=. python -m deku_pkg.cli --catalog examples/catalog.json --install hello-deku
 ```
 
-The command only prints a plan. It does not perform installation.
+The Python command prints a plan only; it does not install software. Run the tests from a clean checkout. GitHub Actions runs the Rust formatting, Clippy and unit-test gates on pull requests.
 
-## Design requirements
+## Security invariants
 
-Signed/versioned repository metadata, source provenance, digest verification, dependency constraints, file ownership, transaction journaling, interruption recovery, privilege separation, license review, and rollback semantics must be designed and tested before any production use. SHA-256 alone does not authenticate a repository publisher.
+- Parse bounded metadata and reject unknown fields, duplicate JSON keys, malformed identifiers and invalid dependency graphs.
+- Pin source revisions and artifact digests; a digest is an integrity check, not publisher authentication.
+- Prefer streaming verification with a caller-supplied maximum artifact size instead of buffering unbounded downloads.
+- Never execute arbitrary package-provided scripts as root during inspection or native installation.
+- Keep ordinary queries and planning unprivileged; privileged operations need a separately reviewed and narrow helper.
+- Stage into a temporary root before live-system changes; implement journaling and rollback only after interruption and recovery tests exist.
+- Keep RPM/DEB inspection and import as advanced, disabled-by-default compatibility paths. Flatpak should use upstream tooling rather than a second implementation.
 
-The existing review-policy and upstream-register documents remain relevant to the longer-term project. This prototype is not a replacement for those review requirements.
+## Required milestones before system use
+
+Signed/versioned repository metadata, trust roles, expiry and rollback protection, dependency/version constraints, file ownership and path safety, store immutability, transaction journaling, interruption recovery, license/provenance records, compatibility test fixtures and disposable-VM system tests must pass before this project is integrated into an installation image.
+
+The current validator is one component of that path, not evidence that a production package repository or installable Deku system exists.
