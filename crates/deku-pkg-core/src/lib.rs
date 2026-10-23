@@ -752,7 +752,10 @@ mod tests {
             file: "empty.tar.zst".into(),
             sha256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855".into(),
         };
-        assert_eq!(artifact.verify_reader(std::io::Cursor::new(Vec::<u8>::new()), 0), Ok(0));
+        assert_eq!(
+            artifact.verify_reader(std::io::Cursor::new(Vec::<u8>::new()), 0),
+            Ok(0)
+        );
 
         let bad = Artifact {
             file: "empty.tar.zst".into(),
