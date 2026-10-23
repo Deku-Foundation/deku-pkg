@@ -40,18 +40,33 @@ pub struct Artifact {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CatalogError {
     UnsupportedSchema,
-    TooManyPackages { count: usize, limit: usize },
-    TooManyDependencies { package: String, count: usize, limit: usize },
-    DependencyDepthExceeded { limit: usize },
+    TooManyPackages {
+        count: usize,
+        limit: usize,
+    },
+    TooManyDependencies {
+        package: String,
+        count: usize,
+        limit: usize,
+    },
+    DependencyDepthExceeded {
+        limit: usize,
+    },
     InvalidPackageName(String),
     InvalidVersion(String),
     UnsupportedArchitecture(String),
     InvalidArtifactFile(String),
     InvalidDigest(String),
     DuplicatePackage(String),
-    DuplicateDependency { package: String, dependency: String },
+    DuplicateDependency {
+        package: String,
+        dependency: String,
+    },
     SelfDependency(String),
-    MissingDependency { package: String, dependency: String },
+    MissingDependency {
+        package: String,
+        dependency: String,
+    },
     DependencyCycle(Vec<String>),
 }
 
@@ -230,10 +245,12 @@ impl Catalog {
                 });
             }
 
-            let package = packages.get(name).ok_or_else(|| CatalogError::MissingDependency {
-                package: stack.last().cloned().unwrap_or_default(),
-                dependency: name.to_string(),
-            })?;
+            let package = packages
+                .get(name)
+                .ok_or_else(|| CatalogError::MissingDependency {
+                    package: stack.last().cloned().unwrap_or_default(),
+                    dependency: name.to_string(),
+                })?;
             temporary.insert(name.to_string());
             stack.push(name.to_string());
 
@@ -342,7 +359,12 @@ mod tests {
 
     #[test]
     fn invalid_package_identifiers_are_rejected() {
-        for name in ["Uppercase", "1starts-with-digit", "name with spaces", "../escape"] {
+        for name in [
+            "Uppercase",
+            "1starts-with-digit",
+            "name with spaces",
+            "../escape",
+        ] {
             let catalog = Catalog {
                 schema_version: 1,
                 packages: vec![pkg(name, &[])],
