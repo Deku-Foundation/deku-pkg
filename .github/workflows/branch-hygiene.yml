@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: write
+  pull-requests: read
 
 concurrency:
   group: branch-hygiene-${{ github.repository }}
@@ -16,13 +17,15 @@ jobs:
   prune:
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
     steps:
       - name: Check out repository with write access
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           fetch-depth: 0
           persist-credentials: true
-      - name: Keep only main and dev
+      - name: Keep main and dev; preserve active pull requests
         shell: bash
         run: |
           set -euo pipefail
@@ -31,6 +34,15 @@ jobs:
             case "$branch" in
               main|dev) continue ;;
             esac
-            printf 'Deleting non-standard branch: %s\n' "$branch"
+
+            # Never delete the head of an open pull request. Such a branch
+            # can be removed safely after its PR is merged or closed.
+            open_prs="$(gh pr list --state open --head "$branch" --json number --jq 'length')"
+            if [[ "$open_prs" != "0" ]]; then
+              printf 'Preserving branch with %s open PR(s): %s\n' "$open_prs" "$branch"
+              continue
+            fi
+
+            printf 'Deleting non-standard branch without open PRs: %s\n' "$branch"
             git push origin --delete "$branch"
           done < <(git ls-remote --heads origin)
