@@ -63,12 +63,18 @@ impl Artifact {
             // single extra byte is sufficient to prove that the stream is too large.
             let remaining = max_bytes.saturating_sub(total);
             let read_limit = remaining.saturating_add(1).min(buffer.len() as u64) as usize;
-            let read = reader.read(&mut buffer[..read_limit]).map_err(|error| {
-                CatalogError::ArtifactReadError {
-                    file: self.file.clone(),
-                    message: error.to_string(),
+            let read = loop {
+                match reader.read(&mut buffer[..read_limit]) {
+                    Ok(read) => break read,
+                    Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+                    Err(error) => {
+                        return Err(CatalogError::ArtifactReadError {
+                            file: self.file.clone(),
+                            message: error.to_string(),
+                        });
+                    }
                 }
-            })?;
+            };
             if read == 0 {
                 break;
             }
@@ -708,6 +714,56 @@ mod tests {
         assert!(matches!(
             artifact.verify_reader(BrokenReader, 1024),
             Err(CatalogError::ArtifactReadError { .. })
+        ));
+    }
+
+    #[test]
+    fn streaming_verifier_retries_interrupted_reads() {
+        struct InterruptOnce {
+            interrupted: bool,
+            bytes: std::io::Cursor<Vec<u8>>,
+        }
+
+        impl std::io::Read for InterruptOnce {
+            fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+                if !self.interrupted {
+                    self.interrupted = true;
+                    return Err(std::io::Error::from(std::io::ErrorKind::Interrupted));
+                }
+                std::io::Read::read(&mut self.bytes, buffer)
+            }
+        }
+
+        let artifact = Artifact {
+            file: "app.tar.zst".into(),
+            sha256: "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad".into(),
+        };
+        let reader = InterruptOnce {
+            interrupted: false,
+            bytes: std::io::Cursor::new(b"abc".to_vec()),
+        };
+
+        assert_eq!(artifact.verify_reader(reader, 3), Ok(3));
+    }
+
+    #[test]
+    fn streaming_verifier_accepts_empty_artifact_only_with_empty_digest() {
+        let artifact = Artifact {
+            file: "empty.tar.zst".into(),
+            sha256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855".into(),
+        };
+        assert_eq!(
+            artifact.verify_reader(std::io::Cursor::new(Vec::<u8>::new()), 0),
+            Ok(0)
+        );
+
+        let bad = Artifact {
+            file: "empty.tar.zst".into(),
+            sha256: "a".repeat(64),
+        };
+        assert!(matches!(
+            bad.verify_reader(std::io::Cursor::new([]), 0),
+            Err(CatalogError::ArtifactDigestMismatch { .. })
         ));
     }
 
