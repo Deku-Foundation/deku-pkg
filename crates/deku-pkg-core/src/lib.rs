@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 
+const MAX_CATALOG_JSON_BYTES: usize = 16 * 1024 * 1024;
 const MAX_CATALOG_PACKAGES: usize = 4_096;
 const MAX_PACKAGE_DEPENDENCIES: usize = 256;
 const MAX_DEPENDENCY_DEPTH: usize = 512;
@@ -60,6 +61,11 @@ impl Artifact {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CatalogError {
     UnsupportedSchema,
+    MetadataTooLarge {
+        size: usize,
+        limit: usize,
+    },
+    InvalidJson(String),
     TooManyPackages {
         count: usize,
         limit: usize,
@@ -139,10 +145,25 @@ fn valid_file(value: &str) -> bool {
 }
 
 impl Catalog {
-    /// Validate metadata before trusting it as input to a planner.
+    /// Parse and validate untrusted JSON with a byte limit enforced before deserialization.
+    pub fn from_json(bytes: &[u8]) -> Result<Self, CatalogError> {
+        if bytes.len() > MAX_CATALOG_JSON_BYTES {
+            return Err(CatalogError::MetadataTooLarge {
+                size: bytes.len(),
+                limit: MAX_CATALOG_JSON_BYTES,
+            });
+        }
+
+        let catalog: Self = serde_json::from_slice(bytes)
+            .map_err(|error| CatalogError::InvalidJson(error.to_string()))?;
+        catalog.validate()?;
+        Ok(catalog)
+    }
+
+    /// Validate parsed metadata before trusting it as input to a planner.
     ///
-    /// These bounds limit graph complexity, but the caller must also limit the
-    /// raw JSON byte length before deserializing an untrusted catalog.
+    /// This method assumes deserialization already happened. For untrusted JSON,
+    /// use from_json() so the raw byte limit applies before parser allocation.
     pub fn validate(&self) -> Result<(), CatalogError> {
         if self.schema_version != 1 {
             return Err(CatalogError::UnsupportedSchema);
@@ -344,6 +365,56 @@ mod tests {
             packages: vec![pkg("lib", &[]), pkg("app", &["lib"])],
         };
         assert_eq!(forward.install_order(), reversed.install_order());
+    }
+
+    #[test]
+    fn bounded_json_parser_accepts_a_valid_empty_catalog() {
+        let result = Catalog::from_json(br#"{"schema_version":1,"packages":[]}"#);
+        assert_eq!(
+            result,
+            Ok(Catalog {
+                schema_version: 1,
+                packages: vec![],
+            })
+        );
+    }
+
+    #[test]
+    fn bounded_json_parser_validates_deserialized_metadata() {
+        let json = br#"{"schema_version":2,"packages":[]}"#;
+        assert!(matches!(
+            Catalog::from_json(json),
+            Err(CatalogError::UnsupportedSchema)
+        ));
+    }
+
+    #[test]
+    fn invalid_json_is_rejected_by_bounded_parser() {
+        assert!(matches!(
+            Catalog::from_json(b"{not-json"),
+            Err(CatalogError::InvalidJson(_))
+        ));
+    }
+
+    #[test]
+    fn oversized_json_is_rejected_before_deserialization() {
+        let oversized = vec![b' '; MAX_CATALOG_JSON_BYTES + 1];
+        assert!(matches!(
+            Catalog::from_json(&oversized),
+            Err(CatalogError::MetadataTooLarge {
+                size,
+                limit: MAX_CATALOG_JSON_BYTES
+            }) if size == MAX_CATALOG_JSON_BYTES + 1
+        ));
+    }
+
+    #[test]
+    fn duplicate_struct_fields_are_rejected_by_json_parser() {
+        let json = br#"{"schema_version":1,"schema_version":2,"packages":[]}"#;
+        assert!(matches!(
+            Catalog::from_json(json),
+            Err(CatalogError::InvalidJson(_))
+        ));
     }
 
     #[test]
