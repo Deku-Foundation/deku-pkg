@@ -59,23 +59,25 @@ impl Artifact {
         let mut total = 0_u64;
 
         loop {
-            let read = reader
-                .read(&mut buffer)
-                .map_err(|error| CatalogError::ArtifactReadError {
-                    file: self.file.clone(),
-                    message: error.to_string(),
-                })?;
+            let read =
+                reader
+                    .read(&mut buffer)
+                    .map_err(|error| CatalogError::ArtifactReadError {
+                        file: self.file.clone(),
+                        message: error.to_string(),
+                    })?;
             if read == 0 {
                 break;
             }
 
-            let next_total = total
-                .checked_add(read as u64)
-                .ok_or_else(|| CatalogError::ArtifactTooLarge {
-                    file: self.file.clone(),
-                    size: u64::MAX,
-                    limit: max_bytes,
-                })?;
+            let next_total =
+                total
+                    .checked_add(read as u64)
+                    .ok_or_else(|| CatalogError::ArtifactTooLarge {
+                        file: self.file.clone(),
+                        size: u64::MAX,
+                        limit: max_bytes,
+                    })?;
             if next_total > max_bytes {
                 return Err(CatalogError::ArtifactTooLarge {
                     file: self.file.clone(),
@@ -645,7 +647,10 @@ mod tests {
             file: "app.tar.zst".into(),
             sha256: "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad".into(),
         };
-        assert_eq!(artifact.verify_reader(std::io::Cursor::new(b"abc"), 3), Ok(3));
+        assert_eq!(
+            artifact.verify_reader(std::io::Cursor::new(b"abc"), 3),
+            Ok(3)
+        );
     }
 
     #[test]
