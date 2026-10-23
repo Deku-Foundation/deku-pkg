@@ -56,10 +56,7 @@ fn valid_name(value: &str) -> bool {
     !value.is_empty()
         && value.len() <= 128
         && value.as_bytes()[0].is_ascii_lowercase().then_some(true).unwrap_or(false)
-            || (!value.is_empty()
-                && value.len() <= 128
-                && value.as_bytes()[0].is_ascii_digit()
-                && value.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b"._+-".contains(&b)))
+        && value.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b"._+-".contains(&b))
 }
 
 fn valid_digest(value: &str) -> bool {
