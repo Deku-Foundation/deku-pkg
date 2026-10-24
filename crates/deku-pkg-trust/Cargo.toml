@@ -7,6 +7,7 @@ description = "TUF-backed repository metadata and artifact verification for Deku
 
 [dependencies]
 tough = { version = "=0.24.0", features = ["http"] }
+libc = "0.2"
 tokio = { version = "1", features = ["fs"] }
 url = "2"
 

@@ -39,6 +39,11 @@ pub enum TrustError {
         limit: u64,
     },
     DatastoreUnavailable(String),
+    UnsafeTrustedRootOwner,
+    UnsafeTrustedRootPermissions,
+    UnsafeDirectoryOwner {
+        field: &'static str,
+    },
     UnsafeDirectoryPermissions {
         field: &'static str,
     },
@@ -67,6 +72,18 @@ impl fmt::Display for TrustError {
             Self::DatastoreUnavailable(reason) => {
                 write!(f, "TUF datastore is not usable: {reason}")
             }
+            Self::UnsafeTrustedRootOwner => write!(
+                f,
+                "trusted root metadata must be owned by the effective user running the package manager"
+            ),
+            Self::UnsafeTrustedRootPermissions => write!(
+                f,
+                "trusted root metadata must not be group- or world-writable"
+            ),
+            Self::UnsafeDirectoryOwner { field } => write!(
+                f,
+                "{field} must be owned by the effective user running the package manager"
+            ),
             Self::UnsafeDirectoryPermissions { field } => write!(
                 f,
                 "{field} must not be group- or world-writable; metadata rollback state must be protected"
@@ -140,6 +157,7 @@ impl RepositoryConfig {
         if !root_metadata.file_type().is_file() || root_metadata.file_type().is_symlink() {
             return Err(TrustError::InvalidTrustedRootPath);
         }
+        ensure_private_trusted_root(&root_metadata)?;
         if root_metadata.len() == 0 {
             return Err(TrustError::TrustedRootEmpty);
         }
@@ -270,11 +288,59 @@ impl TrustedRepository {
 /// or delete its metadata. The same rule applies to a directory receiving
 /// verified package bytes. Callers must also protect ancestor directories.
 #[cfg(unix)]
+fn effective_uid() -> u32 {
+    // SAFETY: geteuid has no preconditions and returns the current process UID.
+    unsafe { libc::geteuid() as u32 }
+}
+
+#[cfg(not(unix))]
+fn effective_uid() -> u32 {
+    0
+}
+
+#[cfg(unix)]
+fn ensure_private_trusted_root(metadata: &std::fs::Metadata) -> Result<(), TrustError> {
+    ensure_private_trusted_root_for_uid(metadata, effective_uid())
+}
+
+#[cfg(unix)]
+fn ensure_private_trusted_root_for_uid(
+    metadata: &std::fs::Metadata,
+    expected_uid: u32,
+) -> Result<(), TrustError> {
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+    if metadata.uid() != expected_uid {
+        return Err(TrustError::UnsafeTrustedRootOwner);
+    }
+    if metadata.permissions().mode() & 0o022 != 0 {
+        return Err(TrustError::UnsafeTrustedRootPermissions);
+    }
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn ensure_private_trusted_root(_metadata: &std::fs::Metadata) -> Result<(), TrustError> {
+    Ok(())
+}
+
+#[cfg(unix)]
 fn ensure_private_directory(
     metadata: &std::fs::Metadata,
     field: &'static str,
 ) -> Result<(), TrustError> {
-    use std::os::unix::fs::PermissionsExt;
+    ensure_private_directory_for_uid(metadata, field, effective_uid())
+}
+
+#[cfg(unix)]
+fn ensure_private_directory_for_uid(
+    metadata: &std::fs::Metadata,
+    field: &'static str,
+    expected_uid: u32,
+) -> Result<(), TrustError> {
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+    if metadata.uid() != expected_uid {
+        return Err(TrustError::UnsafeDirectoryOwner { field });
+    }
     if metadata.permissions().mode() & 0o022 != 0 {
         return Err(TrustError::UnsafeDirectoryPermissions { field });
     }
@@ -340,6 +406,62 @@ fn validate_target_name(name: &str) -> Result<(), TrustError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn rejects_trusted_root_owned_by_another_uid() {
+        use std::os::unix::fs::MetadataExt;
+        use tempfile::tempdir;
+
+        let temp = tempdir().unwrap();
+        let root = temp.path().join("root.json");
+        std::fs::write(&root, b"root metadata").unwrap();
+        let metadata = std::fs::symlink_metadata(&root).unwrap();
+        let unexpected_uid = metadata.uid().wrapping_add(1);
+
+        assert!(matches!(
+            ensure_private_trusted_root_for_uid(&metadata, unexpected_uid),
+            Err(TrustError::UnsafeTrustedRootOwner)
+        ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rejects_group_or_world_writable_trusted_root() {
+        use std::os::unix::fs::{MetadataExt, PermissionsExt};
+        use tempfile::tempdir;
+
+        let temp = tempdir().unwrap();
+        let root = temp.path().join("root.json");
+        std::fs::write(&root, b"root metadata").unwrap();
+        std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o666)).unwrap();
+        let metadata = std::fs::symlink_metadata(&root).unwrap();
+
+        assert!(matches!(
+            ensure_private_trusted_root_for_uid(&metadata, metadata.uid()),
+            Err(TrustError::UnsafeTrustedRootPermissions)
+        ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rejects_datastore_owned_by_another_uid() {
+        use std::os::unix::fs::MetadataExt;
+        use tempfile::tempdir;
+
+        let temp = tempdir().unwrap();
+        let directory = temp.path().join("datastore");
+        std::fs::create_dir(&directory).unwrap();
+        let metadata = std::fs::symlink_metadata(&directory).unwrap();
+        let unexpected_uid = metadata.uid().wrapping_add(1);
+
+        assert!(matches!(
+            ensure_private_directory_for_uid(&metadata, "datastore_path", unexpected_uid),
+            Err(TrustError::UnsafeDirectoryOwner {
+                field: "datastore_path"
+            })
+        ));
+    }
 
     #[test]
     fn accepts_https_repository_bases() {
