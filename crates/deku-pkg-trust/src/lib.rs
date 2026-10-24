@@ -628,6 +628,31 @@ mod signed_repository_fixture_tests {
 
     #[cfg(unix)]
     #[tokio::test]
+    async fn rejects_group_or_world_writable_trusted_root_metadata() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temporary = tempdir().expect("temporary directory");
+        let datastore = temporary.path().join("datastore");
+        let root_copy = temporary.path().join("trusted-root.json");
+        fs::create_dir(&datastore).unwrap();
+        fs::copy(
+            upstream_fixture().join("metadata").join("1.root.json"),
+            &root_copy,
+        )
+        .unwrap();
+        fs::set_permissions(&root_copy, fs::Permissions::from_mode(0o666)).unwrap();
+
+        let mut config = local_fixture_config(&upstream_fixture(), &datastore);
+        config.trusted_root_path = root_copy;
+        let result = config.load().await;
+        assert!(
+            matches!(result, Err(TrustError::UnsafeFilePermissions { field: "trusted_root_path" })),
+            "group/world-writable trust anchors must be rejected, got {result:?}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
     async fn rejects_symlinked_trusted_root_metadata() {
         use std::os::unix::fs::symlink;
 
