@@ -1,8 +1,8 @@
-pub mod journal_store;
-
 //! Experimental, side-effect-free core for Deku package metadata.
 //! This crate validates a bounded catalog and computes a deterministic dependency order.
 //! It does not download, install, execute package scripts, or mutate the host.
+
+pub mod journal_store;
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
