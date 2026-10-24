@@ -105,14 +105,8 @@ impl TransactionJournalStore {
             }
         }
 
-        let temporary = self.create_temporary_path(journal)?;
+        let (temporary, mut file) = self.create_temporary_file(journal)?;
         let write_result = (|| {
-            let mut file = open_private_new_file(&temporary).map_err(|error| {
-                JournalStoreError::Io {
-                    operation: "create temporary journal",
-                    message: error.to_string(),
-                }
-            })?;
             file.write_all(&bytes).map_err(|error| JournalStoreError::Io {
                 operation: "write temporary journal",
                 message: error.to_string(),
@@ -196,10 +190,10 @@ impl TransactionJournalStore {
         Ok(self.directory.join(format!("{transaction_id}.json")))
     }
 
-    fn create_temporary_path(
+    fn create_temporary_file(
         &self,
         journal: &TransactionJournal,
-    ) -> Result<PathBuf, JournalStoreError> {
+    ) -> Result<(PathBuf, File), JournalStoreError> {
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map(|duration| duration.as_nanos())
@@ -213,10 +207,7 @@ impl TransactionJournalStore {
                 attempt
             ));
             match open_private_new_file(&path) {
-                Ok(file) => {
-                    drop(file);
-                    return Ok(path);
-                }
+                Ok(file) => return Ok((path, file)),
                 Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
                 Err(error) => {
                     return Err(JournalStoreError::Io {
