@@ -535,10 +535,10 @@ impl TransactionJournal {
             return Err(TransactionError::UnsupportedSchema);
         }
         self.validate()?;
-        if let Some(value) = note.as_deref() {
-            if !valid_transaction_note(value) {
-                return Err(TransactionError::InvalidNote);
-            }
+        if let Some(value) = note.as_deref()
+            && !valid_transaction_note(value)
+        {
+            return Err(TransactionError::InvalidNote);
         }
         if !transition_allowed(self.state, next) {
             return Err(TransactionError::InvalidTransition {
