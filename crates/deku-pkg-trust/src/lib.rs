@@ -655,7 +655,12 @@ mod signed_repository_fixture_tests {
         config.trusted_root_path = root_copy;
         let result = config.load().await;
         assert!(
-            matches!(result, Err(TrustError::UnsafeFilePermissions { field: "trusted_root_path" })),
+            matches!(
+                result,
+                Err(TrustError::UnsafeFilePermissions {
+                    field: "trusted_root_path"
+                })
+            ),
             "group/world-writable trust anchors must be rejected, got {result:?}"
         );
     }
