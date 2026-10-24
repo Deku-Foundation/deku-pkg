@@ -1051,4 +1051,99 @@ mod tests {
             ));
         }
     }
+
+    #[test]
+    fn transaction_journal_records_a_valid_commit_path() {
+        let mut journal = TransactionJournal::new("txn-0001").unwrap();
+        journal.transition(TransactionState::Acquiring, None).unwrap();
+        journal.transition(TransactionState::Verifying, None).unwrap();
+        journal.transition(TransactionState::Staging, None).unwrap();
+        journal.transition(TransactionState::ReadyToCommit, None).unwrap();
+        journal.transition(TransactionState::Committing, None).unwrap();
+        journal.transition(TransactionState::Committed, Some("files verified".into())).unwrap();
+        assert_eq!(journal.validate(), Ok(()));
+        assert_eq!(journal.recovery_disposition(), RecoveryDisposition::NoRecoveryRequired);
+    }
+
+    #[test]
+    fn transaction_journal_rejects_skipping_verification() {
+        let mut journal = TransactionJournal::new("txn-0002").unwrap();
+        assert!(matches!(
+            journal.transition(TransactionState::Committing, None),
+            Err(TransactionError::InvalidTransition {
+                from: TransactionState::Planned,
+                to: TransactionState::Committing
+            })
+        ));
+        assert_eq!(journal.state, TransactionState::Planned);
+    }
+
+    #[test]
+    fn transaction_journal_rejects_transitions_after_commit() {
+        let mut journal = TransactionJournal::new("txn-0003").unwrap();
+        journal.transition(TransactionState::Failed, None).unwrap();
+        assert!(matches!(
+            journal.transition(TransactionState::Committed, None),
+            Err(TransactionError::InvalidTransition {
+                from: TransactionState::Failed,
+                to: TransactionState::Committed
+            })
+        ));
+    }
+
+    #[test]
+    fn transaction_journal_rejects_invalid_ids_and_notes() {
+        assert!(matches!(
+            TransactionJournal::new("../unsafe"),
+            Err(TransactionError::InvalidTransactionId)
+        ));
+        let mut journal = TransactionJournal::new("txn-0004").unwrap();
+        assert!(matches!(
+            journal.transition(TransactionState::Failed, Some("bad\nmessage".into())),
+            Err(TransactionError::InvalidNote)
+        ));
+    }
+
+    #[test]
+    fn transaction_journal_round_trips_and_validates_history() {
+        let mut journal = TransactionJournal::new("txn-0005").unwrap();
+        journal.transition(TransactionState::Failed, Some("verification failed".into())).unwrap();
+        let bytes = serde_json::to_vec(&journal).unwrap();
+        assert_eq!(TransactionJournal::from_json(&bytes), Ok(journal));
+
+        let mut inconsistent = serde_json::to_value(TransactionJournal::new("txn-0006").unwrap()).unwrap();
+        inconsistent["state"] = serde_json::to_value(TransactionState::Committed).unwrap();
+        let bytes = serde_json::to_vec(&inconsistent).unwrap();
+        assert_eq!(
+            TransactionJournal::from_json(&bytes),
+            Err(TransactionError::InvalidHistory)
+        );
+    }
+
+    #[test]
+    fn transaction_journal_fails_closed_on_unknown_fields_and_oversize() {
+        assert!(matches!(
+            TransactionJournal::from_json(br#"{"schema_version":1,"transaction_id":"txn-0007","state":"planned","history":[],"execute":"true"}"#),
+            Err(TransactionError::InvalidJson(_))
+        ));
+        let oversized = vec![b' '; MAX_TRANSACTION_JOURNAL_BYTES + 1];
+        assert!(matches!(
+            TransactionJournal::from_json(&oversized),
+            Err(TransactionError::JournalTooLarge { .. })
+        ));
+    }
+
+    #[test]
+    fn transaction_journal_treats_commit_window_as_reconciliation_only() {
+        let mut journal = TransactionJournal::new("txn-0008").unwrap();
+        journal.transition(TransactionState::Acquiring, None).unwrap();
+        journal.transition(TransactionState::Verifying, None).unwrap();
+        journal.transition(TransactionState::Staging, None).unwrap();
+        journal.transition(TransactionState::ReadyToCommit, None).unwrap();
+        journal.transition(TransactionState::Committing, None).unwrap();
+        assert_eq!(
+            journal.recovery_disposition(),
+            RecoveryDisposition::ReconcileFilesystemBeforeContinuing
+        );
+    }
 }
