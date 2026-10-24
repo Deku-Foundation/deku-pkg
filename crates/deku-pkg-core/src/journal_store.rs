@@ -19,9 +19,15 @@ pub enum JournalStoreError {
     InvalidTransactionId,
     UnsafeDirectory,
     UnsafeJournalFile,
-    JournalTooLarge { size: usize, limit: usize },
+    JournalTooLarge {
+        size: usize,
+        limit: usize,
+    },
     InvalidJournal(String),
-    Io { operation: &'static str, message: String },
+    Io {
+        operation: &'static str,
+        message: String,
+    },
 }
 
 impl std::fmt::Display for JournalStoreError {
@@ -32,10 +38,9 @@ impl std::fmt::Display for JournalStoreError {
                 f,
                 "journal directory must be an existing non-symlink directory not writable by group or others"
             ),
-            Self::UnsafeJournalFile => write!(
-                f,
-                "journal path must be a regular, non-symlink file"
-            ),
+            Self::UnsafeJournalFile => {
+                write!(f, "journal path must be a regular, non-symlink file")
+            }
             Self::JournalTooLarge { size, limit } => {
                 write!(f, "journal is {size} bytes; maximum is {limit}")
             }
@@ -70,7 +75,9 @@ impl TransactionJournalStore {
             operation: "canonicalize journal directory",
             message: error.to_string(),
         })?;
-        Ok(Self { directory: canonical })
+        Ok(Self {
+            directory: canonical,
+        })
     }
 
     /// Atomically replace a journal after validating it and durably syncing its
@@ -107,10 +114,11 @@ impl TransactionJournalStore {
 
         let (temporary, mut file) = self.create_temporary_file(journal)?;
         let write_result = (|| {
-            file.write_all(&bytes).map_err(|error| JournalStoreError::Io {
-                operation: "write temporary journal",
-                message: error.to_string(),
-            })?;
+            file.write_all(&bytes)
+                .map_err(|error| JournalStoreError::Io {
+                    operation: "write temporary journal",
+                    message: error.to_string(),
+                })?;
             file.sync_all().map_err(|error| JournalStoreError::Io {
                 operation: "sync temporary journal",
                 message: error.to_string(),
@@ -173,8 +181,10 @@ impl TransactionJournalStore {
             });
         }
 
-        let journal = TransactionJournal::from_json(&bytes)
-            .map_err(|error: TransactionError| JournalStoreError::InvalidJournal(error.to_string()))?;
+        let journal =
+            TransactionJournal::from_json(&bytes).map_err(|error: TransactionError| {
+                JournalStoreError::InvalidJournal(error.to_string())
+            })?;
         if journal.transaction_id != transaction_id {
             return Err(JournalStoreError::InvalidJournal(
                 "transaction identifier does not match its file name".into(),
@@ -270,10 +280,8 @@ mod tests {
     impl TestDirectory {
         fn new() -> Self {
             let count = COUNTER.fetch_add(1, Ordering::Relaxed);
-            let path = std::env::temp_dir().join(format!(
-                "deku-journal-store-{}-{count}",
-                std::process::id()
-            ));
+            let path = std::env::temp_dir()
+                .join(format!("deku-journal-store-{}-{count}", std::process::id()));
             fs::create_dir(&path).unwrap();
             #[cfg(unix)]
             {
@@ -297,17 +305,28 @@ mod tests {
         let mut journal = TransactionJournal::new("txn-store-001").unwrap();
 
         store.save(&journal).unwrap();
-        journal.transition(TransactionState::Acquiring, None).unwrap();
+        journal
+            .transition(TransactionState::Acquiring, None)
+            .unwrap();
         store.save(&journal).unwrap();
-        journal.transition(TransactionState::Verifying, None).unwrap();
+        journal
+            .transition(TransactionState::Verifying, None)
+            .unwrap();
         store.save(&journal).unwrap();
 
         let loaded = store.load("txn-store-001").unwrap();
         assert_eq!(loaded, journal);
         assert_eq!(loaded.state, TransactionState::Verifying);
-        assert_eq!(loaded.recovery_disposition(), crate::RecoveryDisposition::DiscardUncommittedStaging);
+        assert_eq!(
+            loaded.recovery_disposition(),
+            crate::RecoveryDisposition::DiscardUncommittedStaging
+        );
         assert!(!fs::read_dir(&temp.0).unwrap().any(|entry| {
-            entry.unwrap().file_name().to_string_lossy().ends_with(".tmp")
+            entry
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .ends_with(".tmp")
         }));
     }
 
