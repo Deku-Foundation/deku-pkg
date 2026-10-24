@@ -15,8 +15,9 @@ jobs:
       - name: Check out source
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - name: Set up Rust
-        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # pinned action revision
         with:
+          toolchain: 1.99.1
           components: rustfmt, clippy
       - name: Generate lockfile once when bootstrapping the workspace
         run: test -f Cargo.lock || cargo generate-lockfile
