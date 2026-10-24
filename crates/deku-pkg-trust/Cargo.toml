@@ -10,6 +10,9 @@ tough = { version = "=0.24.0", features = ["http"] }
 tokio = { version = "1", features = ["fs"] }
 url = "2"
 
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
 [dev-dependencies]
 tempfile = "3"
 tokio = { version = "1", features = ["macros", "rt"] }
