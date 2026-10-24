@@ -395,6 +395,235 @@ impl Catalog {
     }
 }
 
+
+const MAX_TRANSACTION_JOURNAL_BYTES: usize = 1_048_576;
+const MAX_TRANSACTION_HISTORY: usize = 32;
+const MAX_TRANSACTION_NOTE_BYTES: usize = 512;
+
+/// Durable package-operation state. This type records intent and recovery
+/// requirements; it does not perform filesystem or package operations.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum TransactionState {
+    Planned,
+    Acquiring,
+    Verifying,
+    Staging,
+    ReadyToCommit,
+    Committing,
+    Committed,
+    RollingBack,
+    RolledBack,
+    Failed,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct TransactionEvent {
+    pub sequence: u64,
+    pub from: Option<TransactionState>,
+    pub to: TransactionState,
+    pub note: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct TransactionJournal {
+    pub schema_version: u32,
+    pub transaction_id: String,
+    pub state: TransactionState,
+    pub history: Vec<TransactionEvent>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RecoveryDisposition {
+    /// The transaction is finished; do not mutate the filesystem for recovery.
+    NoRecoveryRequired,
+    /// The operation never entered the commit window; staged work can be
+    /// discarded by a future transaction executor.
+    DiscardUncommittedStaging,
+    /// Filesystem effects may be partial. Reconcile the transaction journal
+    /// with actual file state before any automatic action.
+    ReconcileFilesystemBeforeContinuing,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TransactionError {
+    InvalidTransactionId,
+    UnsupportedSchema,
+    JournalTooLarge { size: usize, limit: usize },
+    InvalidJson(String),
+    InvalidHistory,
+    InvalidTransition { from: TransactionState, to: TransactionState },
+    HistoryLimitExceeded { limit: usize },
+    InvalidNote,
+}
+
+impl std::fmt::Display for TransactionError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{self:?}")
+    }
+}
+
+impl std::error::Error for TransactionError {}
+
+fn valid_transaction_id(value: &str) -> bool {
+    (3..=64).contains(&value.len())
+        && value.as_bytes()[0].is_ascii_lowercase()
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
+}
+
+fn valid_transaction_note(note: &str) -> bool {
+    note.len() <= MAX_TRANSACTION_NOTE_BYTES
+        && !note.is_empty()
+        && !note.chars().any(char::is_control)
+}
+
+fn transition_allowed(from: TransactionState, to: TransactionState) -> bool {
+    use TransactionState::*;
+    match from {
+        Planned => matches!(to, Acquiring | Failed),
+        Acquiring => matches!(to, Verifying | Failed),
+        Verifying => matches!(to, Staging | Failed),
+        Staging => matches!(to, ReadyToCommit | Failed),
+        ReadyToCommit => matches!(to, Committing | RollingBack | Failed),
+        Committing => matches!(to, Committed | RollingBack | Failed),
+        RollingBack => matches!(to, RolledBack | Failed),
+        Committed | RolledBack | Failed => false,
+    }
+}
+
+impl TransactionJournal {
+    /// Create a new plan-only journal. The identifier is caller-supplied so
+    /// callers can choose a cryptographically random identifier without this
+    /// pure core needing a random-number dependency.
+    pub fn new(transaction_id: impl Into<String>) -> Result<Self, TransactionError> {
+        let transaction_id = transaction_id.into();
+        if !valid_transaction_id(&transaction_id) {
+            return Err(TransactionError::InvalidTransactionId);
+        }
+        Ok(Self {
+            schema_version: 1,
+            transaction_id,
+            state: TransactionState::Planned,
+            history: vec![TransactionEvent {
+                sequence: 0,
+                from: None,
+                to: TransactionState::Planned,
+                note: None,
+            }],
+        })
+    }
+
+    /// Record one legal transition. No installation or rollback action is
+    /// executed by this method.
+    pub fn transition(
+        &mut self,
+        next: TransactionState,
+        note: Option<String>,
+    ) -> Result<(), TransactionError> {
+        if self.schema_version != 1 {
+            return Err(TransactionError::UnsupportedSchema);
+        }
+        self.validate()?;
+        if let Some(value) = note.as_deref() {
+            if !valid_transaction_note(value) {
+                return Err(TransactionError::InvalidNote);
+            }
+        }
+        if !transition_allowed(self.state, next) {
+            return Err(TransactionError::InvalidTransition {
+                from: self.state,
+                to: next,
+            });
+        }
+        if self.history.len() >= MAX_TRANSACTION_HISTORY {
+            return Err(TransactionError::HistoryLimitExceeded {
+                limit: MAX_TRANSACTION_HISTORY,
+            });
+        }
+        let sequence = self.history.len() as u64;
+        let previous = self.state;
+        self.history.push(TransactionEvent {
+            sequence,
+            from: Some(previous),
+            to: next,
+            note,
+        });
+        self.state = next;
+        Ok(())
+    }
+
+    /// Validate the complete journal after deserialization or before writing.
+    pub fn validate(&self) -> Result<(), TransactionError> {
+        if self.schema_version != 1 {
+            return Err(TransactionError::UnsupportedSchema);
+        }
+        if !valid_transaction_id(&self.transaction_id)
+            || self.history.is_empty()
+            || self.history.len() > MAX_TRANSACTION_HISTORY
+        {
+            return Err(TransactionError::InvalidHistory);
+        }
+        let first = &self.history[0];
+        if first.sequence != 0
+            || first.from.is_some()
+            || first.to != TransactionState::Planned
+            || first.note.is_some()
+        {
+            return Err(TransactionError::InvalidHistory);
+        }
+        for (index, event) in self.history.iter().enumerate().skip(1) {
+            let previous = &self.history[index - 1];
+            if event.sequence != index as u64
+                || event.from != Some(previous.to)
+                || !transition_allowed(previous.to, event.to)
+                || event.note.as_deref().is_some_and(|note| !valid_transaction_note(note))
+            {
+                return Err(TransactionError::InvalidHistory);
+            }
+        }
+        if self.state != self.history.last().ok_or(TransactionError::InvalidHistory)?.to {
+            return Err(TransactionError::InvalidHistory);
+        }
+        Ok(())
+    }
+
+    /// Parse a bounded journal and re-check every state transition. A local
+    /// journal is not signed metadata and must not be treated as proof that
+    /// the filesystem actually reached the recorded state.
+    pub fn from_json(bytes: &[u8]) -> Result<Self, TransactionError> {
+        if bytes.len() > MAX_TRANSACTION_JOURNAL_BYTES {
+            return Err(TransactionError::JournalTooLarge {
+                size: bytes.len(),
+                limit: MAX_TRANSACTION_JOURNAL_BYTES,
+            });
+        }
+        let journal: Self = serde_json::from_slice(bytes)
+            .map_err(|error| TransactionError::InvalidJson(error.to_string()))?;
+        journal.validate()?;
+        Ok(journal)
+    }
+
+    /// Return a conservative recovery classification. In the commit window,
+    /// callers must compare the journal with actual installed files and package
+    /// ownership state; never infer completion from journal text alone.
+    pub fn recovery_disposition(&self) -> RecoveryDisposition {
+        use TransactionState::*;
+        match self.state {
+            Committed | RolledBack => RecoveryDisposition::NoRecoveryRequired,
+            Planned | Acquiring | Verifying | Staging | ReadyToCommit => {
+                RecoveryDisposition::DiscardUncommittedStaging
+            }
+            Committing | RollingBack | Failed => {
+                RecoveryDisposition::ReconcileFilesystemBeforeContinuing
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
