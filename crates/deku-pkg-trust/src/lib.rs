@@ -42,6 +42,22 @@ pub enum TrustError {
     UnsafeDirectoryPermissions {
         field: &'static str,
     },
+    UnsafeDirectoryOwner {
+        field: &'static str,
+        expected_uid: u32,
+        actual_uid: u32,
+    },
+    UnsafeFilePermissions {
+        field: &'static str,
+    },
+    UnsafeFileOwner {
+        field: &'static str,
+        expected_uid: u32,
+        actual_uid: u32,
+    },
+    UnsupportedPlatform {
+        field: &'static str,
+    },
     InvalidTargetName(String),
     TargetNotFound(String),
     Io {
@@ -70,6 +86,22 @@ impl fmt::Display for TrustError {
             Self::UnsafeDirectoryPermissions { field } => write!(
                 f,
                 "{field} must not be group- or world-writable; metadata rollback state must be protected"
+            ),
+            Self::UnsafeDirectoryOwner { field, expected_uid, actual_uid } => write!(
+                f,
+                "{field} is owned by UID {actual_uid}; the current effective UID is {expected_uid}"
+            ),
+            Self::UnsafeFilePermissions { field } => write!(
+                f,
+                "{field} must not be group- or world-writable"
+            ),
+            Self::UnsafeFileOwner { field, expected_uid, actual_uid } => write!(
+                f,
+                "{field} is owned by UID {actual_uid}; the current effective UID is {expected_uid}"
+            ),
+            Self::UnsupportedPlatform { field } => write!(
+                f,
+                "secure ownership and no-follow checks for {field} are not supported on this platform"
             ),
             Self::InvalidTargetName(name) => {
                 write!(f, "target name is not a safe relative path: {name}")
@@ -131,30 +163,16 @@ impl RepositoryConfig {
     /// The datastore must already exist, must be a real directory rather than
     /// a symlink, and should be writable only by the package-management service.
     pub async fn load(&self) -> Result<TrustedRepository, TrustError> {
-        let root_metadata = tokio::fs::symlink_metadata(&self.trusted_root_path)
-            .await
-            .map_err(|error| TrustError::Io {
-                operation: "inspect trusted root metadata",
-                message: error.to_string(),
-            })?;
-        if !root_metadata.file_type().is_file() || root_metadata.file_type().is_symlink() {
-            return Err(TrustError::InvalidTrustedRootPath);
-        }
-        if root_metadata.len() == 0 {
-            return Err(TrustError::TrustedRootEmpty);
-        }
-        if root_metadata.len() > MAX_TRUSTED_ROOT_BYTES {
-            return Err(TrustError::TrustedRootTooLarge {
-                size: root_metadata.len(),
-                limit: MAX_TRUSTED_ROOT_BYTES,
-            });
-        }
-        let trusted_root = tokio::fs::read(&self.trusted_root_path)
-            .await
-            .map_err(|error| TrustError::Io {
-                operation: "read trusted root metadata",
-                message: error.to_string(),
-            })?;
+        // Open and validate the trust anchor as one bounded operation. A
+        // separate symlink_metadata() followed by read() leaves a check/use race.
+        let trusted_root_path = self.trusted_root_path.clone();
+        let trusted_root =
+            tokio::task::spawn_blocking(move || read_trusted_root(&trusted_root_path))
+                .await
+                .map_err(|error| TrustError::Io {
+                    operation: "join trusted root metadata read",
+                    message: error.to_string(),
+                })??;
 
         let datastore_metadata = tokio::fs::symlink_metadata(&self.datastore_path)
             .await
@@ -265,28 +283,129 @@ impl TrustedRepository {
     }
 }
 
-/// Refuse directories writable by other local users. TUF's persistent datastore
-/// contains anti-rollback state, so an untrusted user must not be able to replace
-/// or delete its metadata. The same rule applies to a directory receiving
-/// verified package bytes. Callers must also protect ancestor directories.
+/// Open the initial trust anchor without following a final-component symlink,
+/// verify the opened file's metadata, and enforce the byte limit while reading.
+/// Caller-provided ancestor directories must also be protected from untrusted
+/// replacement; O_NOFOLLOW guards the final path component atomically.
+#[cfg(unix)]
+fn read_trusted_root(path: &Path) -> Result<Vec<u8>, TrustError> {
+    use std::fs::OpenOptions;
+    use std::io::Read;
+    use std::os::unix::fs::OpenOptionsExt;
+
+    let mut options = OpenOptions::new();
+    options.read(true).custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC);
+    let file = options.open(path).map_err(|error| {
+        if error.raw_os_error() == Some(libc::ELOOP) {
+            TrustError::InvalidTrustedRootPath
+        } else {
+            TrustError::Io {
+                operation: "open trusted root metadata without following symlinks",
+                message: error.to_string(),
+            }
+        }
+    })?;
+    let metadata = file.metadata().map_err(|error| TrustError::Io {
+        operation: "inspect opened trusted root metadata",
+        message: error.to_string(),
+    })?;
+    if !metadata.is_file() {
+        return Err(TrustError::InvalidTrustedRootPath);
+    }
+    ensure_private_file(&metadata, "trusted_root_path")?;
+    if metadata.len() == 0 {
+        return Err(TrustError::TrustedRootEmpty);
+    }
+    if metadata.len() > MAX_TRUSTED_ROOT_BYTES {
+        return Err(TrustError::TrustedRootTooLarge {
+            size: metadata.len(),
+            limit: MAX_TRUSTED_ROOT_BYTES,
+        });
+    }
+
+    let mut bytes = Vec::with_capacity(metadata.len() as usize);
+    file.take(MAX_TRUSTED_ROOT_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|error| TrustError::Io {
+            operation: "read trusted root metadata",
+            message: error.to_string(),
+        })?;
+    if bytes.len() as u64 > MAX_TRUSTED_ROOT_BYTES {
+        return Err(TrustError::TrustedRootTooLarge {
+            size: bytes.len() as u64,
+            limit: MAX_TRUSTED_ROOT_BYTES,
+        });
+    }
+    if bytes.is_empty() {
+        return Err(TrustError::TrustedRootEmpty);
+    }
+    Ok(bytes)
+}
+
+#[cfg(not(unix))]
+fn read_trusted_root(_path: &Path) -> Result<Vec<u8>, TrustError> {
+    Err(TrustError::UnsupportedPlatform {
+        field: "trusted_root_path",
+    })
+}
+
+/// The durable TUF datastore contains anti-rollback state. It and the target
+/// staging directory must be owned by the effective user running this process
+/// and must not be group/world-writable. Ancestor directories must be protected
+/// by service installation and deployment policy as well.
 #[cfg(unix)]
 fn ensure_private_directory(
     metadata: &std::fs::Metadata,
     field: &'static str,
 ) -> Result<(), TrustError> {
-    use std::os::unix::fs::PermissionsExt;
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+    let expected_uid = effective_uid();
+    if metadata.uid() != expected_uid {
+        return Err(TrustError::UnsafeDirectoryOwner {
+            field,
+            expected_uid,
+            actual_uid: metadata.uid(),
+        });
+    }
     if metadata.permissions().mode() & 0o022 != 0 {
         return Err(TrustError::UnsafeDirectoryPermissions { field });
     }
     Ok(())
 }
 
+#[cfg(unix)]
+fn ensure_private_file(
+    metadata: &std::fs::Metadata,
+    field: &'static str,
+) -> Result<(), TrustError> {
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+    let expected_uid = effective_uid();
+    if metadata.uid() != expected_uid {
+        return Err(TrustError::UnsafeFileOwner {
+            field,
+            expected_uid,
+            actual_uid: metadata.uid(),
+        });
+    }
+    if metadata.permissions().mode() & 0o022 != 0 {
+        return Err(TrustError::UnsafeFilePermissions { field });
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn effective_uid() -> u32 {
+    // SAFETY: geteuid takes no pointer arguments and has no preconditions; it
+    // returns the effective UID of the current process.
+    unsafe { libc::geteuid() as u32 }
+}
+
 #[cfg(not(unix))]
 fn ensure_private_directory(
     _metadata: &std::fs::Metadata,
-    _field: &'static str,
+    field: &'static str,
 ) -> Result<(), TrustError> {
-    Ok(())
+    Err(TrustError::UnsupportedPlatform { field })
 }
 
 fn parse_https_base(field: &'static str, value: &str) -> Result<Url, TrustError> {
