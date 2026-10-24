@@ -509,6 +509,79 @@ mod signed_repository_fixture_tests {
 
     #[cfg(unix)]
     #[tokio::test]
+    async fn rejects_symlinked_trusted_root_metadata() {
+        use std::os::unix::fs::symlink;
+
+        let temporary = tempdir().expect("temporary directory");
+        let datastore = temporary.path().join("datastore");
+        let trusted_root_copy = temporary.path().join("trusted-root.json");
+        let trusted_root_link = temporary.path().join("trusted-root-link.json");
+        fs::create_dir(&datastore).unwrap();
+        fs::copy(
+            upstream_fixture().join("metadata").join("1.root.json"),
+            &trusted_root_copy,
+        )
+        .unwrap();
+        symlink(&trusted_root_copy, &trusted_root_link).unwrap();
+
+        let mut config = local_fixture_config(&upstream_fixture(), &datastore);
+        config.trusted_root_path = trusted_root_link;
+        let result = config.load().await;
+        assert!(
+            matches!(result, Err(TrustError::InvalidTrustedRootPath)),
+            "trusted root symlinks must be rejected, got {result:?}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn rejects_symlinked_rollback_datastore() {
+        use std::os::unix::fs::symlink;
+
+        let temporary = tempdir().expect("temporary directory");
+        let real_datastore = temporary.path().join("real-datastore");
+        let datastore_link = temporary.path().join("datastore-link");
+        fs::create_dir(&real_datastore).unwrap();
+        symlink(&real_datastore, &datastore_link).unwrap();
+
+        let result = local_fixture_config(&upstream_fixture(), &datastore_link)
+            .load()
+            .await;
+        assert!(
+            matches!(result, Err(TrustError::DatastoreUnavailable(_))),
+            "rollback state must not be redirected through a symlink, got {result:?}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn rejects_symlinked_target_staging_directory() {
+        use std::os::unix::fs::symlink;
+
+        let temporary = tempdir().expect("temporary directory");
+        let datastore = temporary.path().join("datastore");
+        let real_staging = temporary.path().join("real-staging");
+        let staging_link = temporary.path().join("staging-link");
+        fs::create_dir(&datastore).unwrap();
+        fs::create_dir(&real_staging).unwrap();
+        symlink(&real_staging, &staging_link).unwrap();
+
+        let repository = local_fixture_config(&upstream_fixture(), &datastore)
+            .load()
+            .await
+            .expect("signed local fixture should load");
+        let result = repository
+            .download_verified_target("file1.txt", &staging_link)
+            .await;
+        assert!(
+            matches!(result, Err(TrustError::DatastoreUnavailable(_))),
+            "staging symlinks must be rejected, got {result:?}"
+        );
+        assert!(!real_staging.join("file1.txt").exists());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
     async fn rejects_group_or_world_writable_tuf_datastore() {
         use std::os::unix::fs::PermissionsExt;
 
