@@ -87,15 +87,22 @@ impl fmt::Display for TrustError {
                 f,
                 "{field} must not be group- or world-writable; metadata rollback state must be protected"
             ),
-            Self::UnsafeDirectoryOwner { field, expected_uid, actual_uid } => write!(
+            Self::UnsafeDirectoryOwner {
+                field,
+                expected_uid,
+                actual_uid,
+            } => write!(
                 f,
                 "{field} is owned by UID {actual_uid}; the current effective UID is {expected_uid}"
             ),
-            Self::UnsafeFilePermissions { field } => write!(
-                f,
-                "{field} must not be group- or world-writable"
-            ),
-            Self::UnsafeFileOwner { field, expected_uid, actual_uid } => write!(
+            Self::UnsafeFilePermissions { field } => {
+                write!(f, "{field} must not be group- or world-writable")
+            }
+            Self::UnsafeFileOwner {
+                field,
+                expected_uid,
+                actual_uid,
+            } => write!(
                 f,
                 "{field} is owned by UID {actual_uid}; the current effective UID is {expected_uid}"
             ),
@@ -294,7 +301,9 @@ fn read_trusted_root(path: &Path) -> Result<Vec<u8>, TrustError> {
     use std::os::unix::fs::OpenOptionsExt;
 
     let mut options = OpenOptions::new();
-    options.read(true).custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC);
+    options
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC);
     let file = options.open(path).map_err(|error| {
         if error.raw_os_error() == Some(libc::ELOOP) {
             TrustError::InvalidTrustedRootPath
