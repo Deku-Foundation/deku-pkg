@@ -395,7 +395,6 @@ impl Catalog {
     }
 }
 
-
 const MAX_TRANSACTION_JOURNAL_BYTES: usize = 1_048_576;
 const MAX_TRANSACTION_HISTORY: usize = 32;
 const MAX_TRANSACTION_NOTE_BYTES: usize = 512;
@@ -451,11 +450,19 @@ pub enum RecoveryDisposition {
 pub enum TransactionError {
     InvalidTransactionId,
     UnsupportedSchema,
-    JournalTooLarge { size: usize, limit: usize },
+    JournalTooLarge {
+        size: usize,
+        limit: usize,
+    },
     InvalidJson(String),
     InvalidHistory,
-    InvalidTransition { from: TransactionState, to: TransactionState },
-    HistoryLimitExceeded { limit: usize },
+    InvalidTransition {
+        from: TransactionState,
+        to: TransactionState,
+    },
+    HistoryLimitExceeded {
+        limit: usize,
+    },
     InvalidNote,
 }
 
@@ -580,12 +587,21 @@ impl TransactionJournal {
             if event.sequence != index as u64
                 || event.from != Some(previous.to)
                 || !transition_allowed(previous.to, event.to)
-                || event.note.as_deref().is_some_and(|note| !valid_transaction_note(note))
+                || event
+                    .note
+                    .as_deref()
+                    .is_some_and(|note| !valid_transaction_note(note))
             {
                 return Err(TransactionError::InvalidHistory);
             }
         }
-        if self.state != self.history.last().ok_or(TransactionError::InvalidHistory)?.to {
+        if self.state
+            != self
+                .history
+                .last()
+                .ok_or(TransactionError::InvalidHistory)?
+                .to
+        {
             return Err(TransactionError::InvalidHistory);
         }
         Ok(())
@@ -1055,14 +1071,27 @@ mod tests {
     #[test]
     fn transaction_journal_records_a_valid_commit_path() {
         let mut journal = TransactionJournal::new("txn-0001").unwrap();
-        journal.transition(TransactionState::Acquiring, None).unwrap();
-        journal.transition(TransactionState::Verifying, None).unwrap();
+        journal
+            .transition(TransactionState::Acquiring, None)
+            .unwrap();
+        journal
+            .transition(TransactionState::Verifying, None)
+            .unwrap();
         journal.transition(TransactionState::Staging, None).unwrap();
-        journal.transition(TransactionState::ReadyToCommit, None).unwrap();
-        journal.transition(TransactionState::Committing, None).unwrap();
-        journal.transition(TransactionState::Committed, Some("files verified".into())).unwrap();
+        journal
+            .transition(TransactionState::ReadyToCommit, None)
+            .unwrap();
+        journal
+            .transition(TransactionState::Committing, None)
+            .unwrap();
+        journal
+            .transition(TransactionState::Committed, Some("files verified".into()))
+            .unwrap();
         assert_eq!(journal.validate(), Ok(()));
-        assert_eq!(journal.recovery_disposition(), RecoveryDisposition::NoRecoveryRequired);
+        assert_eq!(
+            journal.recovery_disposition(),
+            RecoveryDisposition::NoRecoveryRequired
+        );
     }
 
     #[test]
@@ -1107,11 +1136,14 @@ mod tests {
     #[test]
     fn transaction_journal_round_trips_and_validates_history() {
         let mut journal = TransactionJournal::new("txn-0005").unwrap();
-        journal.transition(TransactionState::Failed, Some("verification failed".into())).unwrap();
+        journal
+            .transition(TransactionState::Failed, Some("verification failed".into()))
+            .unwrap();
         let bytes = serde_json::to_vec(&journal).unwrap();
         assert_eq!(TransactionJournal::from_json(&bytes), Ok(journal));
 
-        let mut inconsistent = serde_json::to_value(TransactionJournal::new("txn-0006").unwrap()).unwrap();
+        let mut inconsistent =
+            serde_json::to_value(TransactionJournal::new("txn-0006").unwrap()).unwrap();
         inconsistent["state"] = serde_json::to_value(TransactionState::Committed).unwrap();
         let bytes = serde_json::to_vec(&inconsistent).unwrap();
         assert_eq!(
@@ -1136,11 +1168,19 @@ mod tests {
     #[test]
     fn transaction_journal_treats_commit_window_as_reconciliation_only() {
         let mut journal = TransactionJournal::new("txn-0008").unwrap();
-        journal.transition(TransactionState::Acquiring, None).unwrap();
-        journal.transition(TransactionState::Verifying, None).unwrap();
+        journal
+            .transition(TransactionState::Acquiring, None)
+            .unwrap();
+        journal
+            .transition(TransactionState::Verifying, None)
+            .unwrap();
         journal.transition(TransactionState::Staging, None).unwrap();
-        journal.transition(TransactionState::ReadyToCommit, None).unwrap();
-        journal.transition(TransactionState::Committing, None).unwrap();
+        journal
+            .transition(TransactionState::ReadyToCommit, None)
+            .unwrap();
+        journal
+            .transition(TransactionState::Committing, None)
+            .unwrap();
         assert_eq!(
             journal.recovery_disposition(),
             RecoveryDisposition::ReconcileFilesystemBeforeContinuing
