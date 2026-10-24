@@ -56,6 +56,6 @@ The new `crates/deku-pkg-trust` crate uses the maintained `tough` Rust client fo
 
 This is an integration prototype, not yet the default package-manager path:
 - It does not install packages, write the live root, or perform transactions.
-- The `tough 0.24.0` documentation states that delegated roles and TAP 4 multi-repository consensus are not implemented; Deku must not assume delegated repositories are supported.
+- The `tough 0.24.0` documentation states that delegated roles and TAP 4 multi-repository consensus are not implemented; Deku must therefore start with one top-level targets role and must not claim delegated-repository support. The Rust trust boundary opens the out-of-band root with Unix `O_NOFOLLOW`, enforces a bounded read, checks effective-UID ownership and rejects group/world-writable trust-anchor, datastore and staging paths. Ancestor-directory protection remains a deployment responsibility.
 - Unit tests cover strict URL/target-name policy plus a signed local TUF fixture: verified target download, target-digest tampering, symlink rejection for trusted-root/datastore/staging paths, and shared-writable-directory rejection. Explicit key-rotation, persisted rollback/freeze, expired-metadata, and concurrent-client tests remain required before release.
 - The first trusted root must come from a reviewed out-of-band channel. Downloading the initial root from the same unauthenticated repository would defeat bootstrapping trust.
