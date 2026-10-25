@@ -33,6 +33,10 @@ cargo run -p deku-pkg -- files ./example.dpak
 
 Each command fully checks payload digests before displaying metadata or paths. The CLI does not install, extract, fetch, or change system state.
 
+## Native version semantics
+
+The Rust core now includes a first Deku-native version comparator. It parses an optional numeric epoch, upstream version, and optional release; compares long numeric runs without integer overflow; and sorts tilde prereleases before the matching base version. This is an intentionally documented RPM-inspired subset, not a claim of RPM, DNF, Debian, XBPS, or SemVer compatibility. It is a foundation for version constraints in the solver, not yet a complete dependency resolver.
+
 ## Run checks
 
 Rust core tests and lint checks:
