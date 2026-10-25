@@ -41,7 +41,6 @@ fn print_summary(
     println!("Manifest entries: {}", manifest.files.len());
     println!("Payload bytes: {payload_size}");
     println!("Archive bytes: {archive_size}");
-    println!("Archive SHA-256: {archive_sha256}");
     println!("Archive integrity: verified (per-file SHA-256)");
     println!("Publisher authentication: not provided by the archive format");
 }
@@ -651,6 +650,7 @@ fn run_pack(args: &[OsString]) -> ExitCode {
 
     println!("Built native Deku package: {}", destination.display());
     println!("Archive bytes: {archive_size}");
+    println!("Archive SHA-256: {archive_sha256}");
     println!("Package artifact: deterministic, internal file digests recorded");
     println!("No package was installed and no live system root was changed.");
     ExitCode::SUCCESS
