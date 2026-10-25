@@ -12,7 +12,11 @@ fn print_usage() {
     );
 }
 
-fn print_summary(archive_size: u64, payload_size: u64, manifest: &deku_pkg_core::package_archive::PackageArchiveManifest) {
+fn print_summary(
+    archive_size: u64,
+    payload_size: u64,
+    manifest: &deku_pkg_core::package_archive::PackageArchiveManifest,
+) {
     println!("Package: {}", manifest.package.name);
     println!("Version: {}", manifest.package.version);
     println!("Architecture: {}", manifest.package.architecture);
@@ -21,7 +25,10 @@ fn print_summary(archive_size: u64, payload_size: u64, manifest: &deku_pkg_core:
     if manifest.package.dependencies.is_empty() {
         println!("Runtime dependencies: (none)");
     } else {
-        println!("Runtime dependencies: {}", manifest.package.dependencies.join(", "));
+        println!(
+            "Runtime dependencies: {}",
+            manifest.package.dependencies.join(", ")
+        );
     }
     println!("Manifest entries: {}", manifest.files.len());
     println!("Payload bytes: {payload_size}");
@@ -82,7 +89,10 @@ fn run(args: Vec<OsString>) -> ExitCode {
     let verified = match inspect_archive(&mut BufReader::new(file)) {
         Ok(archive) => archive,
         Err(error) => {
-            eprintln!("deku-pkg: archive verification failed for {}: {error}", path.display());
+            eprintln!(
+                "deku-pkg: archive verification failed for {}: {error}",
+                path.display()
+            );
             return ExitCode::FAILURE;
         }
     };
