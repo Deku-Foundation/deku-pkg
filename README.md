@@ -9,12 +9,19 @@ Deku's package system is being developed as a native, Rust-based package manager
 ## Current prototype layout
 
 - `deku_pkg/` — original Python plan/catalog prototype and command-line entry point.
-- `crates/deku-pkg-core/` — Rust metadata model, bounded JSON parser, semantic validator, deterministic dependency planner and artifact-digest verifier.
+- crates/deku-pkg-core/ — Rust metadata model, bounded JSON parser, semantic validator, deterministic dependency planner, artifact-digest verifier and native archive v1 module (package_archive).
 - `docs/prototype-v0.md` — initial prototype scope and acceptance gates.
 - `docs/native-store-and-transactions.md` — proposed immutable store, repository trust, transaction states and compatibility policy.
 - `examples/catalog.json` — illustrative Python prototype catalog.
 
 The Rust core has no root privileges or host mutation APIs. Its streaming artifact verifier checks data integrity against the digest recorded in metadata; SHA-256 alone does not authenticate the repository publisher. A signed repository format, authenticated metadata freshness, key rotation/revocation, and the network client are not implemented yet.
+
+
+## Native archive v1
+
+The current development branch introduces an original Deku archive format with deterministic manifest ordering and a bounded streaming verifier. The manifest records package identity, ABI, license expression, runtime dependency names, file kinds, permission bits, byte sizes and SHA-256 digests. Version 1 permits regular files and directories only; it rejects traversal paths, duplicate entries, file/parent collisions, privileged mode bits and tampered payloads. It does not yet extract files, install packages, authenticate publishers by itself, or mutate the host. Repository publisher authentication remains the responsibility of the separate TUF-backed trust layer.
+
+Implementation and design review: docs/architecture/native-package-engine-upstream-review.md.
 
 ## Run checks
 
