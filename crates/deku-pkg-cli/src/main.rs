@@ -8,10 +8,11 @@ use deku_pkg_trust::RepositoryConfig;
 use std::env;
 use std::ffi::OsString;
 use std::fs::{self, File, OpenOptions};
-use std::io::{BufReader, Read};
+use std::io::{BufReader, Read, Write};
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::time::{SystemTime, UNIX_EPOCH};
+use sha2::{Digest, Sha256};
 
 fn print_usage() {
     println!(
@@ -40,6 +41,7 @@ fn print_summary(
     println!("Manifest entries: {}", manifest.files.len());
     println!("Payload bytes: {payload_size}");
     println!("Archive bytes: {archive_size}");
+    println!("Archive SHA-256: {archive_sha256}");
     println!("Archive integrity: verified (per-file SHA-256)");
     println!("Publisher authentication: not provided by the archive format");
 }
@@ -367,6 +369,40 @@ fn run_trusted_plan(args: &[OsString]) -> ExitCode {
     ExitCode::SUCCESS
 }
 
+
+struct DigestWriter<'a> {
+    inner: &'a mut File,
+    hasher: Sha256,
+    written: u64,
+}
+
+impl<'a> DigestWriter<'a> {
+    fn new(inner: &'a mut File) -> Self {
+        Self {
+            inner,
+            hasher: Sha256::new(),
+            written: 0,
+        }
+    }
+
+    fn finish(self) -> (u64, String) {
+        (self.written, format!("{:x}", self.hasher.finalize()))
+    }
+}
+
+impl Write for DigestWriter<'_> {
+    fn write(&mut self, buffer: &[u8]) -> std::io::Result<usize> {
+        let written = self.inner.write(buffer)?;
+        self.hasher.update(&buffer[..written]);
+        self.written = self.written.saturating_add(written as u64);
+        Ok(written)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.inner.flush()
+    }
+}
+
 fn create_pack_temp(parent: &std::path::Path) -> Result<(PathBuf, File), String> {
     const MAX_ATTEMPTS: u32 = 32;
     let timestamp = SystemTime::now()
@@ -553,7 +589,9 @@ fn run_pack(args: &[OsString]) -> ExitCode {
         }
     };
 
-    let built = write_archive_from_directory(&source_root, package, &mut file);
+    let mut digest_writer = DigestWriter::new(&mut file);
+    let built = write_archive_from_directory(&source_root, package, &mut digest_writer);
+    let (bytes_written, archive_sha256) = digest_writer.finish();
     let archive_size = match built {
         Ok(size) => size,
         Err(error) => {
@@ -563,6 +601,12 @@ fn run_pack(args: &[OsString]) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
+    if bytes_written != archive_size {
+        drop(file);
+        let _ = fs::remove_file(&temporary);
+        eprintln!("deku-pkg: package writer reported inconsistent output length");
+        return ExitCode::FAILURE;
+    }
     if let Err(error) = file.sync_all() {
         drop(file);
         let _ = fs::remove_file(&temporary);
