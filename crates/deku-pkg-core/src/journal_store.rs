@@ -160,7 +160,7 @@ impl TransactionJournalStore {
         }
 
         let file = open_journal_file(&path).map_err(|error| {
-            if error.raw_os_error() == Some(libc::ELOOP) {
+            if is_symlink_open_error(&error) {
                 JournalStoreError::UnsafeJournalFile
             } else {
                 JournalStoreError::Io {
@@ -280,6 +280,16 @@ fn ensure_private_journal_file(metadata: &fs::Metadata) -> Result<(), JournalSto
         return Err(JournalStoreError::UnsafeJournalFile);
     }
     Ok(())
+}
+
+#[cfg(unix)]
+fn is_symlink_open_error(error: &std::io::Error) -> bool {
+    error.raw_os_error() == Some(libc::ELOOP)
+}
+
+#[cfg(not(unix))]
+fn is_symlink_open_error(_error: &std::io::Error) -> bool {
+    false
 }
 
 #[cfg(unix)]
@@ -409,6 +419,28 @@ mod tests {
             Err(JournalStoreError::UnsafeDirectory)
         ));
         fs::set_permissions(&temp.0, fs::Permissions::from_mode(0o700)).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rejects_group_or_world_writable_journal_files() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temp = TestDirectory::new();
+        let store = TransactionJournalStore::open(&temp.0).unwrap();
+        let journal = TransactionJournal::new("txn-store-005").unwrap();
+        let path = store.save(&journal).unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o666))
+            .expect("make journal group/world writable");
+
+        assert!(matches!(
+            store.load("txn-store-005"),
+            Err(JournalStoreError::UnsafeJournalFile)
+        ));
+        assert!(matches!(
+            store.save(&journal),
+            Err(JournalStoreError::UnsafeJournalFile)
+        ));
     }
 
     #[cfg(unix)]
