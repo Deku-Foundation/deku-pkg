@@ -1,3 +1,4 @@
+use deku_pkg_core::content_store::ContentStore;
 use deku_pkg_core::package_archive::{MAX_PACKAGE_ARCHIVE_BYTES, PackageFileKind, inspect_archive};
 use deku_pkg_core::solver::{DependencyRequirement, VersionConstraint};
 use deku_pkg_core::solver_catalog::SolverCatalog;
@@ -11,7 +12,7 @@ use std::process::ExitCode;
 
 fn print_usage() {
     println!(
-        "Usage:\n  deku-pkg inspect <archive>\n  deku-pkg verify <archive>\n  deku-pkg files <archive>\n  deku-pkg plan <catalog.json> <x86_64|aarch64> <package[>=version,...]>...\n  deku-pkg trusted-plan <root.json> <metadata-url> <targets-url> <datastore> <staging> <catalog-target> <x86_64|aarch64> <package[>=version,...]>...\n  deku-pkg --version"
+        "Usage:\n  deku-pkg inspect <archive>\n  deku-pkg verify <archive>\n  deku-pkg files <archive>\n  deku-pkg plan <catalog.json> <x86_64|aarch64> <package[>=version,...]>...\n  deku-pkg trusted-plan <root.json> <metadata-url> <targets-url> <datastore> <staging> <catalog-target> <x86_64|aarch64> <package[>=version,...]>...\n  deku-pkg trusted-fetch-plan <root.json> <metadata-url> <targets-url> <datastore> <staging> <store> <catalog-target> <x86_64|aarch64> <package[>=version,...]>...\n  deku-pkg --version"
     );
 }
 
@@ -363,6 +364,296 @@ fn run_trusted_plan(args: &[OsString]) -> ExitCode {
     ExitCode::SUCCESS
 }
 
+
+fn run_trusted_fetch_plan(args: &[OsString]) -> ExitCode {
+    if args.len() < 10 {
+        print_usage();
+        eprintln!(
+            "deku-pkg: trusted-fetch-plan requires root, metadata URL, targets URL, datastore, staging, store, catalog target, architecture, and at least one package"
+        );
+        return ExitCode::from(2);
+    }
+
+    let metadata_url = match utf8_argument(args, 2, "metadata URL") {
+        Ok(value) => value,
+        Err(error) => {
+            eprintln!("deku-pkg: {error}");
+            return ExitCode::from(2);
+        }
+    };
+    let targets_url = match utf8_argument(args, 3, "targets URL") {
+        Ok(value) => value,
+        Err(error) => {
+            eprintln!("deku-pkg: {error}");
+            return ExitCode::from(2);
+        }
+    };
+    let catalog_target = match utf8_argument(args, 7, "catalog target") {
+        Ok(value) => value,
+        Err(error) => {
+            eprintln!("deku-pkg: {error}");
+            return ExitCode::from(2);
+        }
+    };
+    let architecture = match utf8_argument(args, 8, "target architecture") {
+        Ok(value) => value,
+        Err(error) => {
+            eprintln!("deku-pkg: {error}");
+            return ExitCode::from(2);
+        }
+    };
+
+    let roots = match args[9..]
+        .iter()
+        .map(|argument| {
+            argument
+                .to_str()
+                .ok_or_else(|| "package requirement must be valid UTF-8".to_string())
+                .and_then(parse_root_requirement)
+        })
+        .collect::<Result<Vec<_>, _>>()
+    {
+        Ok(roots) => roots,
+        Err(error) => {
+            eprintln!("deku-pkg: invalid package requirement: {error}");
+            return ExitCode::from(2);
+        }
+    };
+
+    let config = match RepositoryConfig::new(
+        PathBuf::from(&args[1]),
+        metadata_url,
+        targets_url,
+        PathBuf::from(&args[4]),
+    ) {
+        Ok(config) => config,
+        Err(error) => {
+            eprintln!("deku-pkg: invalid trusted repository configuration: {error}");
+            return ExitCode::from(2);
+        }
+    };
+
+    let staging = PathBuf::from(&args[5]);
+    let store = match ContentStore::open(PathBuf::from(&args[6])) {
+        Ok(store) => store,
+        Err(error) => {
+            eprintln!("deku-pkg: cannot open protected content store: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let runtime = match tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+    {
+        Ok(runtime) => runtime,
+        Err(error) => {
+            eprintln!("deku-pkg: cannot initialize async runtime: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+
+    const MAX_CATALOG_TARGET_BYTES: u64 = 16 * 1024 * 1024;
+    let verified_target = runtime.block_on(async {
+        let repository = config.load().await?;
+        let target_count = repository.target_count();
+        let catalog_info = repository.target_info(catalog_target)?;
+        if catalog_info.length > MAX_CATALOG_TARGET_BYTES {
+            return Err(deku_pkg_trust::TrustError::TargetTooLarge {
+                name: catalog_info.name,
+                size: catalog_info.length,
+                limit: MAX_CATALOG_TARGET_BYTES,
+            });
+        }
+        let path = repository
+            .download_verified_target(catalog_target, &staging)
+            .await?;
+        Ok::<_, deku_pkg_trust::TrustError>((repository, target_count, path))
+    });
+    let (repository, target_count, catalog_path) = match verified_target {
+        Ok(result) => result,
+        Err(error) => {
+            eprintln!("deku-pkg: TUF repository verification failed: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+
+    let catalog = match read_bounded_catalog(&catalog_path) {
+        Ok(catalog) => catalog,
+        Err(error) => {
+            eprintln!("deku-pkg: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let plan = match catalog.plan(&roots, architecture) {
+        Ok(plan) => plan,
+        Err(error) => {
+            eprintln!("deku-pkg: dependency resolution failed: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+
+    println!("Repository metadata: TUF verified; expiry and rollback checks enforced by tough");
+    println!("Verified top-level repository targets: {target_count}");
+    println!("Catalog target: {catalog_target}");
+    println!("Target architecture: {architecture}");
+    println!("Packages in plan: {}", plan.packages.len());
+    println!("Resolver states explored: {}", plan.explored_states);
+
+    let mut stored_count = 0usize;
+    for package in &plan.packages {
+        let target_info = match repository.target_info(&package.artifact.file) {
+            Ok(info) => info,
+            Err(error) => {
+                eprintln!(
+                    "deku-pkg: planned artifact {} is not authorized by TUF: {error}",
+                    package.artifact.file
+                );
+                return ExitCode::FAILURE;
+            }
+        };
+        if target_info.length > MAX_PACKAGE_ARCHIVE_BYTES {
+            eprintln!(
+                "deku-pkg: artifact {} exceeds the native archive size limit ({} > {})",
+                target_info.name, target_info.length, MAX_PACKAGE_ARCHIVE_BYTES
+            );
+            return ExitCode::FAILURE;
+        }
+        if target_info.sha256 != package.artifact.sha256 {
+            eprintln!(
+                "deku-pkg: SHA-256 mismatch between catalog and signed TUF target metadata for {}",
+                package.artifact.file
+            );
+            return ExitCode::FAILURE;
+        }
+
+        let downloaded = match runtime.block_on(
+            repository.download_verified_target(&package.artifact.file, &staging),
+        ) {
+            Ok(path) => path,
+            Err(error) => {
+                eprintln!(
+                    "deku-pkg: TUF-verified download failed for {}: {error}",
+                    package.artifact.file
+                );
+                return ExitCode::FAILURE;
+            }
+        };
+
+        let metadata = match std::fs::symlink_metadata(&downloaded) {
+            Ok(metadata) => metadata,
+            Err(error) => {
+                eprintln!(
+                    "deku-pkg: cannot inspect downloaded artifact {}: {error}",
+                    package.artifact.file
+                );
+                return ExitCode::FAILURE;
+            }
+        };
+        if !metadata.file_type().is_file() || metadata.file_type().is_symlink() {
+            eprintln!(
+                "deku-pkg: downloaded target is not a regular non-symlink file: {}",
+                package.artifact.file
+            );
+            return ExitCode::FAILURE;
+        }
+        if metadata.len() != target_info.length {
+            eprintln!(
+                "deku-pkg: downloaded length differs from signed TUF metadata for {}",
+                package.artifact.file
+            );
+            return ExitCode::FAILURE;
+        }
+
+        let archive = match File::open(&downloaded)
+            .map(BufReader::new)
+            .map_err(|error| error.to_string())
+            .and_then(|mut reader| inspect_archive(&mut reader).map_err(|error| error.to_string()))
+        {
+            Ok(archive) => archive,
+            Err(error) => {
+                eprintln!(
+                    "deku-pkg: native archive verification failed for {}: {error}",
+                    package.artifact.file
+                );
+                return ExitCode::FAILURE;
+            }
+        };
+
+        if archive.manifest.package.name != package.name
+            || archive.manifest.package.version != package.version.canonical()
+            || archive.manifest.package.architecture != package.architecture
+        {
+            eprintln!(
+                "deku-pkg: archive identity does not match the resolved catalog entry for {}",
+                package.artifact.file
+            );
+            return ExitCode::FAILURE;
+        }
+        if archive.archive_size != target_info.length
+            || archive.archive_size > MAX_PACKAGE_ARCHIVE_BYTES
+        {
+            eprintln!(
+                "deku-pkg: archive size differs from signed metadata or exceeds policy for {}",
+                package.artifact.file
+            );
+            return ExitCode::FAILURE;
+        }
+
+        let input = match File::open(&downloaded) {
+            Ok(file) => file,
+            Err(error) => {
+                eprintln!(
+                    "deku-pkg: cannot reopen verified artifact {}: {error}",
+                    package.artifact.file
+                );
+                return ExitCode::FAILURE;
+            }
+        };
+        let stored = match store.put_reader(
+            input,
+            &package.artifact.sha256,
+            MAX_PACKAGE_ARCHIVE_BYTES,
+        ) {
+            Ok(stored) => stored,
+            Err(error) => {
+                eprintln!(
+                    "deku-pkg: content-store validation failed for {}: {error}",
+                    package.artifact.file
+                );
+                return ExitCode::FAILURE;
+            }
+        };
+        if stored.size != target_info.length {
+            eprintln!(
+                "deku-pkg: content-store length disagrees with signed metadata for {}",
+                package.artifact.file
+            );
+            return ExitCode::FAILURE;
+        }
+        if let Err(error) = store.verify_object(&package.artifact.sha256, MAX_PACKAGE_ARCHIVE_BYTES) {
+            eprintln!(
+                "deku-pkg: stored artifact failed re-verification for {}: {error}",
+                package.artifact.file
+            );
+            return ExitCode::FAILURE;
+        }
+
+        println!(
+            "verified-and-stored {} {} {} sha256:{} path:{}",
+            package.name,
+            package.version,
+            package.architecture,
+            stored.sha256,
+            stored.path.display()
+        );
+        stored_count += 1;
+    }
+
+    println!("Verified and stored package artifacts: {stored_count}");
+    println!("No package was extracted or installed; system state is unchanged.");
+    ExitCode::SUCCESS
+}
+
 fn run(args: Vec<OsString>) -> ExitCode {
     if args.is_empty() {
         print_usage();
@@ -398,6 +689,9 @@ fn run(args: Vec<OsString>) -> ExitCode {
     }
     if command == "trusted-plan" {
         return run_trusted_plan(&args);
+    }
+    if command == "trusted-fetch-plan" {
+        return run_trusted_fetch_plan(&args);
     }
     if !matches!(command, "inspect" | "verify" | "files") {
         print_usage();
