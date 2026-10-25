@@ -89,6 +89,7 @@ fn canonicalize_part(value: &str) -> String {
 
 fn valid_part(value: &str) -> bool {
     !value.is_empty()
+        && value.bytes().any(|byte| byte.is_ascii_alphanumeric())
         && value
             .bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || b"._+-~".contains(&byte))
