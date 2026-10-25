@@ -37,6 +37,10 @@ Each command fully checks payload digests before displaying metadata or paths. T
 
 The Rust core now includes a first Deku-native version comparator. It parses an optional numeric epoch, upstream version, and optional release; compares long numeric runs without integer overflow; and sorts tilde prereleases before the matching base version. This is an intentionally documented RPM-inspired subset, not a claim of RPM, DNF, Debian, XBPS, or SemVer compatibility. It is a foundation for version constraints in the solver, not yet a complete dependency resolver.
 
+## Native dependency resolver
+
+The Rust core now includes an initial pure, version-aware resolver. It supports equality and ordered version constraints, chooses the highest compatible package, filters candidates by target architecture, backtracks when constraints conflict, reports missing/conflicting requirements, and rejects dependency cycles before returning a dependency-first plan. Search-state, candidate, depth, and constraint limits are enforced. This is an initial named-dependency resolver; virtual provides, explicit conflicts, weak dependencies, installed-state reconciliation, repository trust integration, and execution of transactions are not implemented yet.
+
 ## Run checks
 
 Rust core tests and lint checks:
