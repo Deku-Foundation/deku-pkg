@@ -19,7 +19,7 @@ const MAX_PACKAGE_FILES: usize = 100_000;
 const MAX_PACKAGE_DEPENDENCIES: usize = 256;
 const MAX_PACKAGE_PATH_BYTES: usize = 4_096;
 const MAX_PATH_COMPONENT_BYTES: usize = 255;
-const MAX_PACKAGE_ARCHIVE_BYTES: u64 = 8 * 1024 * 1024 * 1024;
+pub const MAX_PACKAGE_ARCHIVE_BYTES: u64 = 8 * 1024 * 1024 * 1024;
 const HASH_BUFFER_BYTES: usize = 64 * 1024;
 
 /// Canonical package identity stored inside a native archive.
