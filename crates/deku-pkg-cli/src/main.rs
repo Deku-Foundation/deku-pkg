@@ -1,18 +1,21 @@
 use deku_pkg_core::content_store::ContentStore;
+use deku_pkg_core::package_builder::write_archive_from_directory;
+use deku_pkg_core::package_archive::PackageInfo;
 use deku_pkg_core::package_archive::{MAX_PACKAGE_ARCHIVE_BYTES, PackageFileKind, inspect_archive};
 use deku_pkg_core::solver::{DependencyRequirement, VersionConstraint};
 use deku_pkg_core::solver_catalog::SolverCatalog;
 use deku_pkg_trust::RepositoryConfig;
 use std::env;
 use std::ffi::OsString;
-use std::fs::File;
+use std::fs::{self, File, OpenOptions};
 use std::io::{BufReader, Read};
 use std::path::PathBuf;
 use std::process::ExitCode;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 fn print_usage() {
     println!(
-        "Usage:\n  deku-pkg inspect <archive>\n  deku-pkg verify <archive>\n  deku-pkg files <archive>\n  deku-pkg plan <catalog.json> <x86_64|aarch64> <package[>=version,...]>...\n  deku-pkg trusted-plan <root.json> <metadata-url> <targets-url> <datastore> <staging> <catalog-target> <x86_64|aarch64> <package[>=version,...]>...\n  deku-pkg trusted-fetch-plan <root.json> <metadata-url> <targets-url> <datastore> <staging> <store> <catalog-target> <x86_64|aarch64> <package[>=version,...]>...\n  deku-pkg --version"
+        "Usage:\n  deku-pkg pack <destdir> <output.dpak> <name> <version> <architecture> <abi> <license> [dependency...]\n  deku-pkg inspect <archive>\n  deku-pkg verify <archive>\n  deku-pkg files <archive>\n  deku-pkg plan <catalog.json> <x86_64|aarch64> <package[>=version,...]>...\n  deku-pkg trusted-plan <root.json> <metadata-url> <targets-url> <datastore> <staging> <catalog-target> <x86_64|aarch64> <package[>=version,...]>...\n  deku-pkg trusted-fetch-plan <root.json> <metadata-url> <targets-url> <datastore> <staging> <store> <catalog-target> <x86_64|aarch64> <package[>=version,...]>...\n  deku-pkg --version"
     );
 }
 
@@ -364,6 +367,236 @@ fn run_trusted_plan(args: &[OsString]) -> ExitCode {
     ExitCode::SUCCESS
 }
 
+
+fn create_pack_temp(parent: &std::path::Path) -> Result<(PathBuf, File), String> {
+    const MAX_ATTEMPTS: u32 = 32;
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or_default();
+
+    for attempt in 0..MAX_ATTEMPTS {
+        let path = parent.join(format!(
+            ".deku-pack-{}-{timestamp}-{attempt}.tmp",
+            std::process::id()
+        ));
+        let mut options = OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        match options.open(&path) {
+            Ok(file) => return Ok((path, file)),
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(error) => {
+                return Err(format!("cannot create temporary package {}: {error}", path.display()));
+            }
+        }
+    }
+    Err("too many temporary output path collisions".to_string())
+}
+
+fn set_pack_output_permissions(path: &std::path::Path) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(path, fs::Permissions::from_mode(0o644))
+    }
+    #[cfg(not(unix))]
+    {
+        let mut permissions = fs::metadata(path)?.permissions();
+        permissions.set_readonly(false);
+        fs::set_permissions(path, permissions)
+    }
+}
+
+fn run_pack(args: &[OsString]) -> ExitCode {
+    if args.len() < 8 {
+        print_usage();
+        eprintln!(
+            "deku-pkg: pack requires DESTDIR, output, name, version, architecture, ABI, and license"
+        );
+        return ExitCode::from(2);
+    }
+
+    let package_name = match utf8_argument(args, 3, "package name") {
+        Ok(value) => value.to_string(),
+        Err(error) => {
+            eprintln!("deku-pkg: {error}");
+            return ExitCode::from(2);
+        }
+    };
+    let version = match utf8_argument(args, 4, "package version") {
+        Ok(value) => value.to_string(),
+        Err(error) => {
+            eprintln!("deku-pkg: {error}");
+            return ExitCode::from(2);
+        }
+    };
+    let architecture = match utf8_argument(args, 5, "package architecture") {
+        Ok(value) => value.to_string(),
+        Err(error) => {
+            eprintln!("deku-pkg: {error}");
+            return ExitCode::from(2);
+        }
+    };
+    let abi = match utf8_argument(args, 6, "Deku ABI") {
+        Ok(value) => value.to_string(),
+        Err(error) => {
+            eprintln!("deku-pkg: {error}");
+            return ExitCode::from(2);
+        }
+    };
+    let license = match utf8_argument(args, 7, "license expression") {
+        Ok(value) => value.to_string(),
+        Err(error) => {
+            eprintln!("deku-pkg: {error}");
+            return ExitCode::from(2);
+        }
+    };
+    let dependencies = match args[8..]
+        .iter()
+        .map(|argument| {
+            argument
+                .to_str()
+                .map(str::to_string)
+                .ok_or_else(|| "dependency names must be valid UTF-8".to_string())
+        })
+        .collect::<Result<Vec<_>, _>>()
+    {
+        Ok(dependencies) => dependencies,
+        Err(error) => {
+            eprintln!("deku-pkg: {error}");
+            return ExitCode::from(2);
+        }
+    };
+
+    let source_root = PathBuf::from(&args[1]);
+    let output_requested = PathBuf::from(&args[2]);
+    let Some(output_name) = output_requested.file_name() else {
+        eprintln!("deku-pkg: output must name a file");
+        return ExitCode::from(2);
+    };
+    let requested_parent = output_requested
+        .parent()
+        .filter(|path| !path.as_os_str().is_empty())
+        .unwrap_or_else(|| std::path::Path::new("."));
+    let parent_metadata = match fs::symlink_metadata(requested_parent) {
+        Ok(metadata) => metadata,
+        Err(error) => {
+            eprintln!(
+                "deku-pkg: cannot inspect output directory {}: {error}",
+                requested_parent.display()
+            );
+            return ExitCode::FAILURE;
+        }
+    };
+    if !parent_metadata.file_type().is_dir() || parent_metadata.file_type().is_symlink() {
+        eprintln!("deku-pkg: output parent must be a real directory");
+        return ExitCode::FAILURE;
+    }
+    let output_parent = match fs::canonicalize(requested_parent) {
+        Ok(path) => path,
+        Err(error) => {
+            eprintln!("deku-pkg: cannot canonicalize output directory: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let destination = output_parent.join(output_name);
+    match fs::symlink_metadata(&destination) {
+        Ok(_) => {
+            eprintln!(
+                "deku-pkg: refusing to overwrite existing output {}",
+                destination.display()
+            );
+            return ExitCode::FAILURE;
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => {
+            eprintln!("deku-pkg: cannot inspect output path: {error}");
+            return ExitCode::FAILURE;
+        }
+    }
+
+    let package = PackageInfo {
+        name: package_name,
+        version,
+        architecture,
+        abi,
+        license,
+        dependencies,
+    };
+    let (temporary, mut file) = match create_pack_temp(&output_parent) {
+        Ok(result) => result,
+        Err(error) => {
+            eprintln!("deku-pkg: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+
+    let built = write_archive_from_directory(&source_root, package, &mut file);
+    let archive_size = match built {
+        Ok(size) => size,
+        Err(error) => {
+            drop(file);
+            let _ = fs::remove_file(&temporary);
+            eprintln!("deku-pkg: package build failed: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    if let Err(error) = file.sync_all() {
+        drop(file);
+        let _ = fs::remove_file(&temporary);
+        eprintln!("deku-pkg: cannot sync built archive: {error}");
+        return ExitCode::FAILURE;
+    }
+    drop(file);
+
+    if let Err(error) = set_pack_output_permissions(&temporary) {
+        let _ = fs::remove_file(&temporary);
+        eprintln!("deku-pkg: cannot set package output permissions: {error}");
+        return ExitCode::FAILURE;
+    }
+    if let Err(error) = File::open(&temporary).and_then(|file| file.sync_all()) {
+        let _ = fs::remove_file(&temporary);
+        eprintln!("deku-pkg: cannot sync package output permissions: {error}");
+        return ExitCode::FAILURE;
+    }
+
+    if let Err(error) = fs::hard_link(&temporary, &destination) {
+        let _ = fs::remove_file(&temporary);
+        eprintln!(
+            "deku-pkg: cannot publish package without overwriting {}: {error}",
+            destination.display()
+        );
+        return ExitCode::FAILURE;
+    }
+    if let Err(error) = File::open(&output_parent).and_then(|directory| directory.sync_all()) {
+        let _ = fs::remove_file(&destination);
+        let _ = fs::remove_file(&temporary);
+        eprintln!("deku-pkg: cannot sync output directory: {error}");
+        return ExitCode::FAILURE;
+    }
+    if let Err(error) = fs::remove_file(&temporary) {
+        eprintln!(
+            "deku-pkg: package was published but temporary-file cleanup failed: {error}"
+        );
+        return ExitCode::FAILURE;
+    }
+    if let Err(error) = File::open(&output_parent).and_then(|directory| directory.sync_all()) {
+        eprintln!("deku-pkg: package published but directory sync failed: {error}");
+        return ExitCode::FAILURE;
+    }
+
+    println!("Built native Deku package: {}", destination.display());
+    println!("Archive bytes: {archive_size}");
+    println!("Package artifact: deterministic, internal file digests recorded");
+    println!("No package was installed and no live system root was changed.");
+    ExitCode::SUCCESS
+}
+
 fn run_trusted_fetch_plan(args: &[OsString]) -> ExitCode {
     if args.len() < 10 {
         print_usage();
@@ -688,6 +921,9 @@ fn run(args: Vec<OsString>) -> ExitCode {
     }
     if command == "trusted-fetch-plan" {
         return run_trusted_fetch_plan(&args);
+    }
+    if command == "pack" {
+        return run_pack(&args);
     }
     if !matches!(command, "inspect" | "verify" | "files") {
         print_usage();
