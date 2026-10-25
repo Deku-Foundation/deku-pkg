@@ -13,6 +13,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Component, Path, PathBuf};
+use sha2::{Digest, Sha256};
 
 const HEADER_LEN: usize = 20;
 const HASH_BUFFER_BYTES: usize = 64 * 1024;
@@ -215,7 +216,7 @@ fn extract_verified<R: Read + Seek>(
             .sha256
             .as_deref()
             .ok_or_else(|| ExtractionError::SourceChanged(entry.path.clone()))?;
-        let mut hasher = sha2::Sha256::new();
+        let mut hasher = Sha256::new();
         let mut remaining = entry.size;
         while remaining > 0 {
             let chunk_len = remaining.min(buffer.len() as u64) as usize;
@@ -313,15 +314,16 @@ fn extract_verified<R: Read + Seek>(
         .and_then(|directory| directory.sync_all())
         .map_err(|error| io_error("sync extraction root", root, error))?;
 
+    let files_written = manifest
+        .files
+        .iter()
+        .filter(|entry| entry.kind == PackageFileKind::File)
+        .count();
     Ok(ExtractionReport {
         package: manifest.package,
         archive_bytes: verified.archive_size,
         payload_bytes: payload_total,
-        files_written: manifest
-            .files
-            .iter()
-            .filter(|entry| entry.kind == PackageFileKind::File)
-            .count(),
+        files_written,
         directories_created: created_directories.len(),
     })
 }
