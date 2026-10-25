@@ -370,7 +370,6 @@ fn run_trusted_plan(args: &[OsString]) -> ExitCode {
     ExitCode::SUCCESS
 }
 
-
 struct DigestWriter<'a> {
     inner: &'a mut File,
     hasher: Sha256,
