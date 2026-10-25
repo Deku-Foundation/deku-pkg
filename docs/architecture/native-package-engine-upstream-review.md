@@ -92,6 +92,13 @@ The CLI now includes a read-only `trusted-fetch-plan` command. It loads reposito
 
 No package is extracted or installed. This command establishes a complete **metadata-trusted, bytes-verified, archive-inspected, content-addressed fetch path**, not a transaction executor. The next gates are build provenance/catalog release integration, file ownership/collision policy, staged extraction into an isolated root, durable install journal and crash-recovery testing before any live-root write is designed.
 
+
+## DESTDIR package builder
+
+The CLI now exposes `deku-pkg pack DESTDIR OUTPUT NAME VERSION ARCH ABI LICENSE [DEPENDENCY...]`. The builder performs a sorted filesystem walk without following symlinks, permits only regular files and directories, rejects device nodes/FIFOs and setuid/setgid/sticky modes, captures relative path/mode/size/SHA-256 metadata, and streams payload bytes in archive order. It reads every regular file once to calculate its digest and again while writing, checking size and digest in the second pass to detect changes. The CLI writes to a private same-directory temporary file, syncs it, sets the published artifact permissions, and hard-links to the destination without overwriting an existing path.
+
+This makes native artifact creation possible from an already-populated DESTDIR. It does not execute package build scripts or assemble DESTDIR itself; that stays with the isolated worker in `deku-build`. It also does not sign artifacts or establish repository trust. The destination should be written by a controlled build worker with an isolated source/output directory, and build provenance/source pinning remain release gates.
+
 ## Trust and licensing boundaries
 
 - Do not enable Void repositories, keys, or binary packages as Deku defaults.
