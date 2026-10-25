@@ -138,7 +138,7 @@ fn run_plan(args: &[OsString]) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let plan = match catalog.plan(&roots, architecture) {
+    let plan = match catalog.plan(&roots, architecture, target_abi) {
         Ok(plan) => plan,
         Err(error) => {
             eprintln!("deku-pkg: dependency resolution failed: {error}");
@@ -176,14 +176,16 @@ fn run_plan(args: &[OsString]) -> ExitCode {
     }
 
     println!("Target architecture: {architecture}");
+    println!("Target ABI: {target_abi}");
     println!("Packages in plan: {}", plan.packages.len());
     println!("Resolver states explored: {}", plan.explored_states);
     for package in &plan.packages {
         println!(
-            "{} {} {} {} sha256:{}",
+            "{} {} {} ABI:{} {} sha256:{}",
             package.name,
             package.version,
             package.architecture,
+            package.abi,
             package.artifact.file,
             package.artifact.sha256
         );
@@ -224,10 +226,10 @@ fn utf8_argument<'a>(args: &'a [OsString], index: usize, label: &str) -> Result<
 }
 
 fn run_trusted_plan(args: &[OsString]) -> ExitCode {
-    if args.len() < 9 {
+    if args.len() < 10 {
         print_usage();
         eprintln!(
-            "deku-pkg: trusted-plan requires root, metadata URL, targets URL, datastore, staging, catalog target, architecture, and at least one package"
+            "deku-pkg: trusted-plan requires root, metadata URL, targets URL, datastore, staging, catalog target, architecture, ABI, and at least one package"
         );
         return ExitCode::from(2);
     }
@@ -260,8 +262,15 @@ fn run_trusted_plan(args: &[OsString]) -> ExitCode {
             return ExitCode::from(2);
         }
     };
+    let target_abi = match utf8_argument(args, 8, "target ABI") {
+        Ok(value) => value,
+        Err(error) => {
+            eprintln!("deku-pkg: {error}");
+            return ExitCode::from(2);
+        }
+    };
 
-    let roots = match args[8..]
+    let roots = match args[9..]
         .iter()
         .map(|argument| {
             argument
@@ -657,10 +666,10 @@ fn run_pack(args: &[OsString]) -> ExitCode {
 }
 
 fn run_trusted_fetch_plan(args: &[OsString]) -> ExitCode {
-    if args.len() < 10 {
+    if args.len() < 11 {
         print_usage();
         eprintln!(
-            "deku-pkg: trusted-fetch-plan requires root, metadata URL, targets URL, datastore, staging, store, catalog target, architecture, and at least one package"
+            "deku-pkg: trusted-fetch-plan requires root, metadata URL, targets URL, datastore, staging, store, catalog target, architecture, ABI, and at least one package"
         );
         return ExitCode::from(2);
     }
@@ -693,8 +702,15 @@ fn run_trusted_fetch_plan(args: &[OsString]) -> ExitCode {
             return ExitCode::from(2);
         }
     };
+    let target_abi = match utf8_argument(args, 9, "target ABI") {
+        Ok(value) => value,
+        Err(error) => {
+            eprintln!("deku-pkg: {error}");
+            return ExitCode::from(2);
+        }
+    };
 
-    let roots = match args[9..]
+    let roots = match args[10..]
         .iter()
         .map(|argument| {
             argument
@@ -873,6 +889,7 @@ fn run_trusted_fetch_plan(args: &[OsString]) -> ExitCode {
         if archive.manifest.package.name != package.name
             || archive.manifest.package.version != package.version.canonical()
             || archive.manifest.package.architecture != package.architecture
+            || archive.manifest.package.abi != package.abi
         {
             eprintln!(
                 "deku-pkg: archive identity does not match the resolved catalog entry for {}",
