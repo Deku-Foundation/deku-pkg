@@ -8,7 +8,6 @@
 //! contracts and are not implied by a successful resolution.
 
 use crate::version::DekuVersion;
-use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
 
 const MAX_CANDIDATES: usize = 65_536;
@@ -192,6 +191,7 @@ fn search(
     target_architecture: &str,
     explored_states: &mut usize,
     failures: &mut BTreeSet<String>,
+    cycles: &mut Vec<Vec<String>>,
     depth: usize,
 ) -> Result<Option<SearchState>, SolveError> {
     *explored_states = explored_states
@@ -248,6 +248,31 @@ fn search(
     }
 
     let Some((name, choices)) = best else {
+        // A dependency cycle is not a valid resolution. Record it as a failed
+        // branch so an alternate package version can be considered.
+        let mut trial_order = Vec::with_capacity(state.selected.len());
+        let mut temporary = BTreeSet::new();
+        let mut permanent = BTreeSet::new();
+        let mut stack = Vec::new();
+        for selected_name in state.selected.keys() {
+            match build_install_order(
+                selected_name,
+                &state.selected,
+                catalog,
+                &mut temporary,
+                &mut permanent,
+                &mut stack,
+                &mut trial_order,
+            ) {
+                Ok(()) => {}
+                Err(SolveError::DependencyCycle(cycle)) => {
+                    failures.extend(cycle.iter().cloned());
+                    cycles.push(cycle);
+                    return Ok(None);
+                }
+                Err(error) => return Err(error),
+            }
+        }
         return Ok(Some(state));
     };
 
@@ -278,6 +303,7 @@ fn search(
             target_architecture,
             explored_states,
             failures,
+            cycles,
             depth + 1,
         )? {
             return Ok(Some(solution));
@@ -414,7 +440,7 @@ pub fn resolve(
         by_name.entry(candidate.name.clone()).or_default().push(index);
     }
 
-    for (name, choices) in &mut by_name {
+    for choices in by_name.values_mut() {
         choices.sort_by(|left, right| {
             let left_candidate = &catalog[*left];
             let right_candidate = &catalog[*right];
@@ -428,7 +454,6 @@ pub fn resolve(
                     left_arch.cmp(&right_arch)
                 })
                 .then_with(|| left_candidate.architecture.cmp(&right_candidate.architecture))
-                .then_with(|| name.cmp(&name))
         });
     }
 
@@ -451,23 +476,30 @@ pub fn resolve(
 
     let mut explored_states = 0;
     let mut failures = BTreeSet::new();
-    let solution = search(
+    let mut cycles = Vec::new();
+    let solution = match search(
         state,
         catalog,
         &by_name,
         target_architecture,
         &mut explored_states,
         &mut failures,
+        &mut cycles,
         0,
-    )?
-    .ok_or_else(|| {
-        if failures.is_empty() {
-            failures.extend(roots.iter().map(|requirement| requirement.name.clone()));
+    )? {
+        Some(solution) => solution,
+        None => {
+            if let Some(cycle) = cycles.into_iter().next() {
+                return Err(SolveError::DependencyCycle(cycle));
+            }
+            if failures.is_empty() {
+                failures.extend(roots.iter().map(|requirement| requirement.name.clone()));
+            }
+            return Err(SolveError::Unsatisfiable {
+                packages: failures.into_iter().collect(),
+            });
         }
-        SolveError::Unsatisfiable {
-            packages: failures.into_iter().collect(),
-        }
-    })?;
+    };
 
     let mut output = Vec::with_capacity(solution.selected.len());
     let mut temporary = BTreeSet::new();
