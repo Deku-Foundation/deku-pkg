@@ -90,6 +90,7 @@ pub enum SolverCatalogError {
         package: String,
         dependency: String,
     },
+    SelfDependency(String),
     TooManyConstraints {
         package: String,
         dependency: String,
@@ -200,6 +201,11 @@ impl SolverCatalog {
                         package: package.name.clone(),
                         dependency: dependency.name.clone(),
                     });
+                }
+                if dependency.name == package.name {
+                    return Err(SolverCatalogError::SelfDependency(
+                        package.name.clone(),
+                    ));
                 }
                 if dependency.constraints.len() > MAX_SOLVER_CATALOG_CONSTRAINTS {
                     return Err(SolverCatalogError::TooManyConstraints {
@@ -427,6 +433,25 @@ mod tests {
         assert!(matches!(
             dependency_catalog.validate(),
             Err(SolverCatalogError::DuplicateDependency { .. })
+        ));
+    }
+
+    #[test]
+    fn rejects_self_dependencies_before_resolution() {
+        let catalog = SolverCatalog {
+            schema_version: 1,
+            packages: vec![package(
+                "app",
+                "1.0-1",
+                "x86_64",
+                "app.pkg",
+                'a',
+                vec![dependency("app", &[])],
+            )],
+        };
+        assert!(matches!(
+            catalog.validate(),
+            Err(SolverCatalogError::SelfDependency(_))
         ));
     }
 
