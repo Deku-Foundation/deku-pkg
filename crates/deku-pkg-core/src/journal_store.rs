@@ -48,7 +48,10 @@ impl std::fmt::Display for JournalStoreError {
                 "refusing to replace transaction history with a stale or divergent journal"
             ),
             Self::UnsupportedPlatform => {
-                write!(f, "durable transaction journal locking is supported on Unix platforms only")
+                write!(
+                    f,
+                    "durable transaction journal locking is supported on Unix platforms only"
+                )
             }
             Self::JournalTooLarge { size, limit } => {
                 write!(f, "journal is {size} bytes; maximum is {limit}")
@@ -278,8 +281,8 @@ impl Drop for StoreLock {
 
 #[cfg(unix)]
 fn acquire_store_lock(directory: &Path) -> Result<StoreLock, JournalStoreError> {
-    use std::os::unix::fs::OpenOptionsExt;
     use std::os::fd::AsRawFd;
+    use std::os::unix::fs::OpenOptionsExt;
 
     let path = directory.join(".journal-store.lock");
     let mut options = OpenOptions::new();
@@ -376,7 +379,11 @@ fn ensure_history_extension(
         .map_err(|error| JournalStoreError::InvalidJournal(error.to_string()))?;
     if previous.transaction_id != next.transaction_id
         || previous.history.len() > next.history.len()
-        || previous.history.iter().zip(&next.history).any(|(old, new)| old != new)
+        || previous
+            .history
+            .iter()
+            .zip(&next.history)
+            .any(|(old, new)| old != new)
     {
         return Err(JournalStoreError::StaleJournalUpdate);
     }
