@@ -496,6 +496,24 @@ mod tests {
         ));
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn rejects_group_or_world_writable_source_file_modes() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = TestDirectory::new();
+        let source = root.0.join("writable.txt");
+        fs::write(&source, b"must not become a package file").expect("write fixture");
+        fs::set_permissions(&source, fs::Permissions::from_mode(0o666))
+            .expect("set group/world writable file mode");
+        let mut output = Vec::new();
+        assert!(matches!(
+            write_archive_from_directory(&root.0, package(), &mut output),
+            Err(BuilderError::Archive(ArchiveError::InvalidMode { .. }))
+        ));
+        assert!(output.is_empty());
+    }
+
     struct MutatingWriter {
         bytes: Vec<u8>,
         path: PathBuf,
