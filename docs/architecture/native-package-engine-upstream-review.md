@@ -57,6 +57,14 @@ This is an RPM-inspired subset for a native contract, not RPM's full algorithm, 
 
 The core now also includes a pure backtracking resolver for named packages and version constraints. It selects the highest compatible version, prefers the target architecture over noarch for equal versions, applies a fail-first deterministic search strategy, and rejects cycles before producing a dependency-first plan. Search limits are explicit. It does not yet support provides/conflicts, weak dependencies, repository lookup, installed-state reconciliation, or transaction execution.
 
+
+## Versioned catalog and planning CLI
+
+The first versioned solver catalog is now defined separately from the older single-version `Catalog` model. This is intentional: changing the legacy schema silently would make existing plans ambiguous. `SolverCatalog` accepts multiple candidates with canonical versions, architecture, safe artifact filenames, SHA-256 digests and dependency constraints. JSON bytes are bounded before parsing, unknown fields are rejected, and duplicate identities/dependencies and self-dependencies fail validation.
+
+The read-only CLI command `deku-pkg plan CATALOG ARCH REQUIREMENT...` loads this catalog, resolves the requested closure, and prints dependency-first package identities with the exact artifact filenames and digests from the validated catalog. Root requirements can use forms such as `desktop-shell>=1.0-1,<2.0-0`. This is not a download or install command. It does not establish that the catalog was published by a trusted repository; the caller must verify signed, fresh repository metadata first. The selected artifact digest must still be checked against downloaded bytes before archive inspection or any future installation.
+
+
 ## Trust and licensing boundaries
 
 - Do not enable Void repositories, keys, or binary packages as Deku defaults.
