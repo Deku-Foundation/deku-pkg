@@ -39,10 +39,11 @@ fn print_summary(
     println!("Publisher authentication: not provided by the archive format");
 }
 
-
 fn parse_root_requirement(value: &str) -> Result<DependencyRequirement, String> {
     if value.is_empty() || value.trim() != value {
-        return Err("requirement must be non-empty and contain no surrounding whitespace".to_string());
+        return Err(
+            "requirement must be non-empty and contain no surrounding whitespace".to_string(),
+        );
     }
 
     let operator_index = value
@@ -75,7 +76,9 @@ fn parse_root_requirement(value: &str) -> Result<DependencyRequirement, String> 
 fn run_plan(args: &[OsString]) -> ExitCode {
     if args.len() < 4 {
         print_usage();
-        eprintln!("deku-pkg: plan requires a catalog, target architecture, and at least one package");
+        eprintln!(
+            "deku-pkg: plan requires a catalog, target architecture, and at least one package"
+        );
         return ExitCode::from(2);
     }
 
@@ -113,10 +116,7 @@ fn run_plan(args: &[OsString]) -> ExitCode {
     // cause an unbounded allocation before the JSON parser enforces limits.
     let max_read = 16 * 1024 * 1024 + 1;
     let mut bytes = Vec::new();
-    if let Err(error) = BufReader::new(file)
-        .take(max_read)
-        .read_to_end(&mut bytes)
-    {
+    if let Err(error) = BufReader::new(file).take(max_read).read_to_end(&mut bytes) {
         eprintln!("deku-pkg: cannot read {}: {error}", path.display());
         return ExitCode::FAILURE;
     }
@@ -124,7 +124,10 @@ fn run_plan(args: &[OsString]) -> ExitCode {
     let catalog = match SolverCatalog::from_json(&bytes) {
         Ok(catalog) => catalog,
         Err(error) => {
-            eprintln!("deku-pkg: invalid solver catalog {}: {error}", path.display());
+            eprintln!(
+                "deku-pkg: invalid solver catalog {}: {error}",
+                path.display()
+            );
             return ExitCode::FAILURE;
         }
     };
