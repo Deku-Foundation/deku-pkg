@@ -626,9 +626,7 @@ fn run_trusted_fetch_plan(args: &[OsString]) -> ExitCode {
             );
             return ExitCode::FAILURE;
         }
-        if let Err(error) =
-            store.verify_object(&package.artifact.sha256, MAX_PACKAGE_ARCHIVE_BYTES)
-        {
+        if let Err(error) = store.verify_object(&package.artifact.sha256, MAX_PACKAGE_ARCHIVE_BYTES) {
             eprintln!(
                 "deku-pkg: stored artifact failed re-verification for {}: {error}",
                 package.artifact.file
