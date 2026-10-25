@@ -397,6 +397,29 @@ mod tests {
     }
 
     #[test]
+    fn resolver_never_selects_a_different_abi_at_the_same_architecture() {
+        let native = package("lib", "1.0-1", "x86_64", "lib-gnu.dpak", 'a', vec![]);
+        let mut incompatible = package("lib", "1.0-1", "x86_64", "lib-musl.dpak", 'b', vec![]);
+        incompatible.abi = "deku1-linux-musl".to_string();
+        let catalog = SolverCatalog {
+            schema_version: 1,
+            packages: vec![native, incompatible],
+        };
+
+        let gnu_plan = catalog
+            .plan(&[DependencyRequirement::any("lib")], "x86_64", "deku1-linux-gnu")
+            .expect("GNU ABI candidate is available");
+        assert_eq!(gnu_plan.packages[0].artifact.file, "lib-gnu.dpak");
+        assert_eq!(gnu_plan.packages[0].abi, "deku1-linux-gnu");
+
+        let musl_plan = catalog
+            .plan(&[DependencyRequirement::any("lib")], "x86_64", "deku1-linux-musl")
+            .expect("musl ABI candidate is available");
+        assert_eq!(musl_plan.packages[0].artifact.file, "lib-musl.dpak");
+        assert_eq!(musl_plan.packages[0].abi, "deku1-linux-musl");
+    }
+
+    #[test]
     fn rejects_noncanonical_versions_and_invalid_artifact_digests() {
         let mut catalog = SolverCatalog {
             schema_version: 1,
