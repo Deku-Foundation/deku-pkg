@@ -434,7 +434,7 @@ fn is_symlink_open_error(_error: &std::io::Error) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ownership::{InstalledDatabase, InstalledPackageRecord};
+    use crate::ownership::InstalledDatabase;
     use crate::package_archive::{
         PackageFileKind, PackageInfo, PackageInputEntry, encode_archive, inspect_archive,
     };
