@@ -72,6 +72,13 @@ The core now has a separate object-store adapter that only accepts a stream when
 
 This adapter stores opaque blobs only. It does not establish publisher identity, decide whether an artifact belongs to an authorized repository snapshot, extract archive members, maintain package ownership, or roll a system profile forward/back. Consumers must first verify trusted repository metadata, then ingest using the authorized artifact digest and size bound, and then run the native archive verifier. Crash/recovery and concurrency tests beyond the initial same-process deduplication fixture remain required before a production claim.
 
+
+## TUF-authenticated catalog planning path
+
+The CLI now has a separate `trusted-plan` path that composes the pure resolver with the existing `deku-pkg-trust` crate. The command accepts an out-of-band trusted root, HTTPS metadata and target base URLs, the persistent TUF datastore, a pre-provisioned staging directory, the catalog target name, architecture and root requirements. It loads the TUF repository (including signature/expiry/rollback checks), asks the trust crate to download the catalog target into staging, parses that target with the bounded strict `SolverCatalog` parser, and only then computes the plan.
+
+This prevents the trusted path from treating an arbitrary local JSON catalog as an official repository catalog. The earlier `plan` command remains intentionally usable for local development fixtures and prints no claim of publisher authentication. The TUF path still has important limits: the package artifacts printed in the plan have not yet been downloaded and individually cross-checked against both their catalog digest and the artifact target metadata; no artifact is extracted or installed. The next integration gate must download each planned artifact through TUF, compare its bytes with the catalog's expected digest, ingest it into the content store, and run the native archive verifier before any staged installation is possible.
+
 ## Trust and licensing boundaries
 
 - Do not enable Void repositories, keys, or binary packages as Deku defaults.
