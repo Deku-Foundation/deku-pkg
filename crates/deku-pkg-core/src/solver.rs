@@ -448,9 +448,16 @@ pub fn resolve(
                 .version
                 .cmp(&left_candidate.version)
                 .then_with(|| {
-                    let left_arch = usize::from(left_candidate.architecture != target_architecture);
-                    let right_arch =
-                        usize::from(right_candidate.architecture != target_architecture);
+                    let left_arch = if left_candidate.architecture == target_architecture {
+                        0
+                    } else {
+                        1
+                    };
+                    let right_arch = if right_candidate.architecture == target_architecture {
+                        0
+                    } else {
+                        1
+                    };
                     left_arch.cmp(&right_arch)
                 })
                 .then_with(|| left_candidate.architecture.cmp(&right_candidate.architecture))
@@ -678,6 +685,24 @@ mod tests {
             resolve(&catalog, &[DependencyRequirement::any("a")], "x86_64"),
             Err(SolveError::DependencyCycle(_))
         ));
+    }
+
+    #[test]
+    fn backtracks_away_from_a_cyclic_newer_version() {
+        let catalog = vec![
+            candidate("a", "2.0-1", "x86_64", vec![DependencyRequirement::any("b")]),
+            candidate("a", "1.0-1", "x86_64", vec![]),
+            candidate("b", "1.0-1", "x86_64", vec![DependencyRequirement::any("a")]),
+        ];
+        let plan = resolve(
+            &catalog,
+            &[DependencyRequirement::any("a")],
+            "x86_64",
+        )
+        .expect("resolver should select a non-cyclic version");
+        assert_eq!(plan.packages.len(), 1);
+        assert_eq!(plan.packages[0].name, "a");
+        assert_eq!(plan.packages[0].version.canonical(), "1.0-1");
     }
 
     #[test]
