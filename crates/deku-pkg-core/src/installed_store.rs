@@ -23,7 +23,10 @@ pub enum DatabaseStoreError {
     UnsafeDirectory,
     UnsafeDatabaseFile,
     UnsafeLockFile,
-    DatabaseTooLarge { size: usize, limit: usize },
+    DatabaseTooLarge {
+        size: usize,
+        limit: usize,
+    },
     InvalidDatabase(String),
     StaleGeneration {
         existing_generation: u64,
@@ -65,7 +68,10 @@ impl std::fmt::Display for DatabaseStoreError {
                 "refusing installed database generation {proposed_generation}; current generation is {existing_generation}"
             ),
             Self::UnsupportedPlatform => {
-                write!(f, "durable installed database locking is supported on Unix platforms only")
+                write!(
+                    f,
+                    "durable installed database locking is supported on Unix platforms only"
+                )
             }
             Self::Io { operation, message } => write!(f, "{operation} failed: {message}"),
         }
@@ -241,7 +247,9 @@ impl InstalledDatabaseStore {
             #[cfg(unix)]
             {
                 use std::os::unix::fs::OpenOptionsExt;
-                options.mode(0o600).custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW);
+                options
+                    .mode(0o600)
+                    .custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW);
             }
             let mut file = match options.open(&path) {
                 Ok(file) => file,
@@ -432,9 +440,9 @@ mod tests {
     };
     use std::io::Cursor;
     use std::path::PathBuf;
+    use std::sync::atomic::{AtomicU64, Ordering};
     use std::sync::{Arc, Barrier};
     use std::thread;
-    use std::sync::atomic::{AtomicU64, Ordering};
 
     static COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -464,7 +472,10 @@ mod tests {
         }
     }
 
-    fn package_manifest(name: &str, content: &[u8]) -> crate::package_archive::PackageArchiveManifest {
+    fn package_manifest(
+        name: &str,
+        content: &[u8],
+    ) -> crate::package_archive::PackageArchiveManifest {
         let package = PackageInfo {
             name: name.to_string(),
             version: "1.0-1".to_string(),
@@ -508,7 +519,9 @@ mod tests {
     fn rejects_stale_and_divergent_database_generations() {
         let temp = TestDirectory::new();
         let store = InstalledDatabaseStore::open(&temp.0).expect("open database store");
-        store.save(&database(2, "app", b"new")).expect("save newer DB");
+        store
+            .save(&database(2, "app", b"new"))
+            .expect("save newer DB");
         assert!(matches!(
             store.save(&database(1, "app", b"old")),
             Err(DatabaseStoreError::StaleGeneration {
@@ -532,7 +545,9 @@ mod tests {
 
         let temp = TestDirectory::new();
         let store = InstalledDatabaseStore::open(&temp.0).expect("open database store");
-        store.save(&database(1, "app", b"good")).expect("save database");
+        store
+            .save(&database(1, "app", b"good"))
+            .expect("save database");
         let path = store.path();
         fs::set_permissions(&path, fs::Permissions::from_mode(0o666))
             .expect("make database insecure");
@@ -559,7 +574,9 @@ mod tests {
     fn serializes_competing_generations_and_rejects_one_stale_writer() {
         let temp = TestDirectory::new();
         let store = InstalledDatabaseStore::open(&temp.0).expect("open database store");
-        store.save(&InstalledDatabase::empty()).expect("save initial database");
+        store
+            .save(&InstalledDatabase::empty())
+            .expect("save initial database");
         let left_db = database(1, "left-app", b"left");
         let right_db = database(1, "right-app", b"right");
 
