@@ -18,12 +18,15 @@ The first implementation slice is the native deterministic archive format in cra
 | Nix | Immutable/content-addressed store objects, derivation inputs, dependency closures, and profile generations that enable rollback. | Store verified payloads by digest and build profiles from explicit closures. Design generations/rollback into the transaction API early. Do not assume that a content-addressed store automatically makes ordinary Linux software relocatable or that a successful rebuild is reproducible without comparing output bytes. |
 | TUF (the tough Rust client already present) | Root/targets/snapshot/timestamp trust roles, expiry and rollback-aware metadata handling. | Use the existing maintained trust adapter instead of inventing a signature protocol. The current adapter is limited to its documented role capabilities and still needs operational rotation/recovery and end-to-end tests. |
 
-Primary upstream references:
-- XBPS implementation and feature set: https://github.com/void-linux/xbps and https://docs.voidlinux.org/xbps/repositories/index.html
+Primary upstream references (review snapshot: 2026-10-25):
+- XBPS implementation, releases, and repository behavior: https://github.com/void-linux/xbps, https://github.com/void-linux/xbps/releases, and https://docs.voidlinux.org/xbps/repositories/index.html
 - RPM packaging project: https://github.com/rpm-software-management/rpm
 - DNF5/libdnf and solver architecture: https://github.com/rpm-software-management/dnf5
 - Nix store and derivations: https://github.com/NixOS/nix/blob/master/doc/manual/source/store/derivation/index.md
-- TUF specification and Rust implementation: https://theupdateframework.io/ and https://github.com/awslabs/tough
+- TUF specification and metadata roles: https://theupdateframework.github.io/specification/ and https://theupdateframework.io/docs/metadata/
+- Rust TUF client used by Deku: https://docs.rs/tough/latest/tough/ and https://github.com/awslabs/tough
+
+Compatibility note from the current upstream docs: the TUF specification index lists v1.0.37, while the tough 0.24.0 client documentation says delegated roles/TAP 3 and TAP 4 are not supported. Deku therefore uses only top-level targets today and must not split its official package catalog across delegated roles until the client or a separately reviewed implementation supports and tests them. The implementation choice is deliberately based on that documented capability limit, not on assuming that a TUF library implements every optional feature.
 
 ## Native archive v1 contract
 
