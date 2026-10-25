@@ -487,6 +487,21 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
+    fn rejects_group_or_world_writable_source_directories() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = TestDirectory::new();
+        fs::set_permissions(&root.0, fs::Permissions::from_mode(0o777))
+            .expect("make source directory unsafe");
+        let mut output = Vec::new();
+        assert!(matches!(
+            write_archive_from_directory(&root.0, package(), &mut output),
+            Err(BuilderError::UnsafeSource(_))
+        ));
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn rejects_symlinks_inside_the_source_tree() {
         use std::os::unix::fs::symlink;
 
