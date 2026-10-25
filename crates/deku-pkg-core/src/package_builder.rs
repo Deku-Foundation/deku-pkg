@@ -99,8 +99,8 @@ pub fn write_archive_from_directory<W: Write>(
             "source file sizes changed while constructing manifest".to_string(),
         ));
     }
-    let manifest_bytes = serde_json::to_vec(&manifest)
-        .map_err(|error| BuilderError::Archive(ArchiveError::InvalidJson(error.to_string())))?;
+    let manifest_bytes =
+        serde_json::to_vec(&manifest).map_err(|error| BuilderError::Write(error.to_string()))?;
     if manifest_bytes.is_empty() || manifest_bytes.len() > MAX_MANIFEST_BYTES {
         return Err(BuilderError::Archive(ArchiveError::ManifestTooLarge {
             size: manifest_bytes.len(),
