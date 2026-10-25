@@ -225,9 +225,7 @@ impl ContentStore {
             operation: "inspect stored object",
             message: error.to_string(),
         })?;
-        if !metadata.file_type().is_file() || metadata.file_type().is_symlink() {
-            return Err(ContentStoreError::UnsafeObject);
-        }
+        ensure_protected_object(&metadata)?;
         if metadata.len() > max_bytes {
             return Err(ContentStoreError::ObjectTooLarge {
                 size: metadata.len(),
@@ -351,9 +349,7 @@ fn verify_existing(
         operation: "inspect existing content-addressed object",
         message: error.to_string(),
     })?;
-    if !metadata.file_type().is_file() || metadata.file_type().is_symlink() {
-        return Err(ContentStoreError::UnsafeObject);
-    }
+    ensure_protected_object(&metadata)?;
     if metadata.len() != expected_size || metadata.len() > max_bytes {
         return Err(ContentStoreError::CorruptExistingObject);
     }
@@ -371,9 +367,33 @@ fn verify_existing(
 
 #[cfg(unix)]
 fn ensure_private_directory(metadata: &fs::Metadata) -> Result<(), ContentStoreError> {
-    use std::os::unix::fs::PermissionsExt;
-    if metadata.permissions().mode() & 0o022 != 0 {
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+    // SAFETY: geteuid has no pointer arguments or preconditions.
+    let effective_uid = unsafe { libc::geteuid() as u32 };
+    if metadata.uid() != effective_uid || metadata.permissions().mode() & 0o022 != 0 {
         return Err(ContentStoreError::UnsafeDirectory);
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn ensure_protected_object(metadata: &fs::Metadata) -> Result<(), ContentStoreError> {
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+    // SAFETY: geteuid has no pointer arguments or preconditions.
+    let effective_uid = unsafe { libc::geteuid() as u32 };
+    if !metadata.file_type().is_file()
+        || metadata.uid() != effective_uid
+        || metadata.permissions().mode() & 0o222 != 0
+    {
+        return Err(ContentStoreError::UnsafeObject);
+    }
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn ensure_protected_object(metadata: &fs::Metadata) -> Result<(), ContentStoreError> {
+    if !metadata.is_file() || !metadata.permissions().readonly() {
+        return Err(ContentStoreError::UnsafeObject);
     }
     Ok(())
 }
@@ -525,6 +545,31 @@ mod tests {
         assert!(matches!(
             store.verify_object(&expected, 1024),
             Err(ContentStoreError::DigestMismatch { .. })
+        ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rejects_existing_objects_that_are_writable() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let directory = TestDirectory::new();
+        let store = ContentStore::open(&directory.0).expect("open store");
+        let bytes = b"object must remain immutable";
+        let expected = digest(bytes);
+        let stored = store
+            .put_reader(Cursor::new(bytes), &expected, 1024)
+            .expect("store object");
+        fs::set_permissions(&stored.path, fs::Permissions::from_mode(0o644))
+            .expect("make stored object writable");
+
+        assert!(matches!(
+            store.verify_object(&expected, 1024),
+            Err(ContentStoreError::UnsafeObject)
+        ));
+        assert!(matches!(
+            store.put_reader(Cursor::new(bytes), &expected, 1024),
+            Err(ContentStoreError::UnsafeObject)
         ));
     }
 
