@@ -1,17 +1,16 @@
-//! Validated JSON catalog for the native version-aware resolver.
+//! Strict, bounded catalog for the native version-aware dependency resolver.
 //!
-//! This is distinct from the legacy schema-v1 catalog in lib.rs, which models
-//! a single package per name. SolverCatalog accepts multiple versions of the
-//! same package and keeps each selected artifact pinned to its file name and
-//! SHA-256. It is still metadata, not publisher authentication: callers must
-//! verify repository trust before treating it as an authoritative catalog.
+//! Unlike the legacy single-version catalog in lib.rs, this schema allows
+//! several versions of a package and pins each candidate to an artifact name,
+//! digest, architecture, and Deku ABI. A parsed catalog is still only metadata;
+//! only the TUF trust layer can authenticate its publisher and freshness.
 
-use crate::Artifact;
 use crate::solver::{
     DependencyRequirement, PackageCandidate, ResolutionPlan, ResolvedPackage, SolveError,
     VersionConstraint, resolve,
 };
 use crate::version::DekuVersion;
+use crate::Artifact;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -34,6 +33,8 @@ pub struct SolverCatalogPackage {
     /// Must use Deku's canonical epoch/upstream-release rendering.
     pub version: String,
     pub architecture: String,
+    /// Runtime ABI identifier, for example deku1-linux-gnu.
+    pub abi: String,
     pub artifact: Artifact,
     #[serde(default)]
     pub dependencies: Vec<SolverCatalogDependency>,
@@ -53,6 +54,7 @@ pub struct PlannedArtifact {
     pub name: String,
     pub version: DekuVersion,
     pub architecture: String,
+    pub abi: String,
     pub artifact: Artifact,
 }
 
@@ -65,31 +67,19 @@ pub struct PinnedResolutionPlan {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SolverCatalogError {
-    MetadataTooLarge {
-        size: usize,
-        limit: usize,
-    },
+    MetadataTooLarge { size: usize, limit: usize },
     InvalidJson(String),
     UnsupportedSchema,
-    TooManyPackages {
-        count: usize,
-        limit: usize,
-    },
+    TooManyPackages { count: usize, limit: usize },
     InvalidPackageName(String),
     InvalidVersion(String),
     NonCanonicalVersion(String),
     UnsupportedArchitecture(String),
+    InvalidAbi(String),
     InvalidArtifactFile(String),
     InvalidDigest(String),
-    TooManyDependencies {
-        package: String,
-        count: usize,
-        limit: usize,
-    },
-    DuplicateDependency {
-        package: String,
-        dependency: String,
-    },
+    TooManyDependencies { package: String, count: usize, limit: usize },
+    DuplicateDependency { package: String, dependency: String },
     SelfDependency(String),
     TooManyConstraints {
         package: String,
@@ -101,6 +91,7 @@ pub enum SolverCatalogError {
         name: String,
         version: String,
         architecture: String,
+        abi: String,
     },
     Resolution(SolveError),
 }
@@ -117,6 +108,14 @@ impl From<SolveError> for SolverCatalogError {
     fn from(value: SolveError) -> Self {
         Self::Resolution(value)
     }
+}
+
+fn valid_abi(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 128
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || b"._+-:".contains(&byte))
 }
 
 impl SolverCatalog {
@@ -145,7 +144,7 @@ impl SolverCatalog {
             });
         }
 
-        let mut identities = BTreeSet::<(String, DekuVersion, String)>::new();
+        let mut identities = BTreeSet::<(String, DekuVersion, String, String)>::new();
         for package in &self.packages {
             if !super::valid_name(&package.name) {
                 return Err(SolverCatalogError::InvalidPackageName(package.name.clone()));
@@ -165,6 +164,9 @@ impl SolverCatalog {
                     package.architecture.clone(),
                 ));
             }
+            if !valid_abi(&package.abi) {
+                return Err(SolverCatalogError::InvalidAbi(package.abi.clone()));
+            }
             if !super::valid_file(&package.artifact.file) {
                 return Err(SolverCatalogError::InvalidArtifactFile(
                     package.artifact.file.clone(),
@@ -181,11 +183,17 @@ impl SolverCatalog {
                 });
             }
 
-            if !identities.insert((package.name.clone(), version, package.architecture.clone())) {
+            if !identities.insert((
+                package.name.clone(),
+                version,
+                package.architecture.clone(),
+                package.abi.clone(),
+            )) {
                 return Err(SolverCatalogError::DuplicatePackage {
                     name: package.name.clone(),
                     version: package.version.clone(),
                     architecture: package.architecture.clone(),
+                    abi: package.abi.clone(),
                 });
             }
 
@@ -225,9 +233,10 @@ impl SolverCatalog {
         Ok(())
     }
 
-    fn candidates(&self) -> Result<Vec<PackageCandidate>, SolverCatalogError> {
+    fn candidates(&self, target_abi: &str) -> Result<Vec<PackageCandidate>, SolverCatalogError> {
         self.packages
             .iter()
+            .filter(|package| package.abi == target_abi)
             .map(|package| {
                 let version = DekuVersion::parse(&package.version)
                     .map_err(|_| SolverCatalogError::InvalidVersion(package.name.clone()))?;
@@ -256,31 +265,40 @@ impl SolverCatalog {
             .collect()
     }
 
-    /// Resolve requested package requirements and pin each selected candidate
-    /// to its exact artifact name and SHA-256 from this validated catalog.
+    /// Resolve requested requirements for a specific architecture and ABI.
+    /// Candidates for other ABIs are excluded before dependency solving.
     pub fn plan(
         &self,
         roots: &[DependencyRequirement],
         target_architecture: &str,
+        target_abi: &str,
     ) -> Result<PinnedResolutionPlan, SolverCatalogError> {
         self.validate()?;
-        let candidates = self.candidates()?;
+        if !valid_abi(target_abi) {
+            return Err(SolverCatalogError::InvalidAbi(target_abi.to_string()));
+        }
+        let candidates = self.candidates(target_abi)?;
         let resolution: ResolutionPlan = resolve(&candidates, roots, target_architecture)?;
 
         let mut by_identity =
-            BTreeMap::<(String, DekuVersion, String), &SolverCatalogPackage>::new();
-        for package in &self.packages {
+            BTreeMap::<(String, DekuVersion, String, String), &SolverCatalogPackage>::new();
+        for package in self.packages.iter().filter(|package| package.abi == target_abi) {
             let version = DekuVersion::parse(&package.version)
                 .map_err(|_| SolverCatalogError::InvalidVersion(package.name.clone()))?;
             by_identity.insert(
-                (package.name.clone(), version, package.architecture.clone()),
+                (
+                    package.name.clone(),
+                    version,
+                    package.architecture.clone(),
+                    package.abi.clone(),
+                ),
                 package,
             );
         }
 
         let mut packages = Vec::with_capacity(resolution.packages.len());
         for resolved in resolution.packages {
-            packages.push(pin_artifact(&by_identity, resolved)?);
+            packages.push(pin_artifact(&by_identity, resolved, target_abi)?);
         }
 
         Ok(PinnedResolutionPlan {
@@ -291,13 +309,15 @@ impl SolverCatalog {
 }
 
 fn pin_artifact(
-    by_identity: &BTreeMap<(String, DekuVersion, String), &SolverCatalogPackage>,
+    by_identity: &BTreeMap<(String, DekuVersion, String, String), &SolverCatalogPackage>,
     resolved: ResolvedPackage,
+    target_abi: &str,
 ) -> Result<PlannedArtifact, SolverCatalogError> {
     let key = (
         resolved.name.clone(),
         resolved.version.clone(),
         resolved.architecture.clone(),
+        target_abi.to_string(),
     );
     let package = by_identity.get(&key).ok_or_else(|| {
         SolverCatalogError::Resolution(SolveError::Unsatisfiable {
@@ -308,6 +328,7 @@ fn pin_artifact(
         name: resolved.name,
         version: resolved.version,
         architecture: resolved.architecture,
+        abi: package.abi.clone(),
         artifact: package.artifact.clone(),
     })
 }
@@ -335,6 +356,7 @@ mod tests {
             name: name.to_string(),
             version: version.to_string(),
             architecture: architecture.to_string(),
+            abi: "deku1-linux-gnu".to_string(),
             artifact: artifact(file, digest_char),
             dependencies,
         }
@@ -360,15 +382,19 @@ mod tests {
                     'a',
                     vec![dependency("lib", &[">=2.0-0", "<3.0-0"])],
                 ),
-                package("lib", "2.0-1", "x86_64", "lib-2.0-1.pkg", 'b', vec![]),
-                package("lib", "2.9-1", "x86_64", "lib-2.9-1.pkg", 'c', vec![]),
-                package("lib", "3.0-1", "x86_64", "lib-3.0-1.pkg", 'd', vec![]),
+                package("lib", "2.0-1", "x86_64", "lib-2.0-1.dpak", 'b', vec![]),
+                package("lib", "2.9-1", "x86_64", "lib-2.9-1.dpak", 'c', vec![]),
+                package("lib", "3.0-1", "x86_64", "lib-3.0-1.dpak", 'd', vec![]),
             ],
         };
         let json = serde_json::to_vec(&catalog).expect("serialize fixture");
         let parsed = SolverCatalog::from_json(&json).expect("parse validated catalog");
         let plan = parsed
-            .plan(&[DependencyRequirement::any("app")], "x86_64")
+            .plan(
+                &[DependencyRequirement::any("app")],
+                "x86_64",
+                "deku1-linux-gnu",
+            )
             .expect("create pinned plan");
 
         assert_eq!(
@@ -379,7 +405,7 @@ mod tests {
             vec!["lib", "app"]
         );
         assert_eq!(plan.packages[0].version.canonical(), "2.9-1");
-        assert_eq!(plan.packages[0].artifact.file, "lib-2.9-1.pkg");
+        assert_eq!(plan.packages[0].artifact.file, "lib-2.9-1.dpak");
         assert_eq!(plan.packages[0].artifact.sha256, "c".repeat(64));
     }
 
@@ -389,7 +415,11 @@ mod tests {
             SolverCatalog::from_json(include_bytes!("../../../examples/solver-catalog-v1.json"))
                 .expect("example catalog is valid");
         let plan = catalog
-            .plan(&[DependencyRequirement::any("desktop-shell")], "x86_64", "deku1-linux-gnu")
+            .plan(
+                &[DependencyRequirement::any("desktop-shell")],
+                "x86_64",
+                "deku1-linux-gnu",
+            )
             .expect("example plan resolves");
         assert_eq!(plan.packages.len(), 2);
         assert_eq!(plan.packages[0].name, "libc");
@@ -407,13 +437,21 @@ mod tests {
         };
 
         let gnu_plan = catalog
-            .plan(&[DependencyRequirement::any("lib")], "x86_64", "deku1-linux-gnu")
+            .plan(
+                &[DependencyRequirement::any("lib")],
+                "x86_64",
+                "deku1-linux-gnu",
+            )
             .expect("GNU ABI candidate is available");
         assert_eq!(gnu_plan.packages[0].artifact.file, "lib-gnu.dpak");
         assert_eq!(gnu_plan.packages[0].abi, "deku1-linux-gnu");
 
         let musl_plan = catalog
-            .plan(&[DependencyRequirement::any("lib")], "x86_64", "deku1-linux-musl")
+            .plan(
+                &[DependencyRequirement::any("lib")],
+                "x86_64",
+                "deku1-linux-musl",
+            )
             .expect("musl ABI candidate is available");
         assert_eq!(musl_plan.packages[0].artifact.file, "lib-musl.dpak");
         assert_eq!(musl_plan.packages[0].abi, "deku1-linux-musl");
@@ -423,7 +461,7 @@ mod tests {
     fn rejects_noncanonical_versions_and_invalid_artifact_digests() {
         let mut catalog = SolverCatalog {
             schema_version: 1,
-            packages: vec![package("lib", "1.01-1", "x86_64", "lib.pkg", 'a', vec![])],
+            packages: vec![package("lib", "1.01-1", "x86_64", "lib.dpak", 'a', vec![])],
         };
         assert!(matches!(
             catalog.validate(),
@@ -440,7 +478,7 @@ mod tests {
 
     #[test]
     fn rejects_duplicate_package_identity_and_duplicate_dependencies() {
-        let same = package("lib", "1.0-1", "x86_64", "lib.pkg", 'a', vec![]);
+        let same = package("lib", "1.0-1", "x86_64", "lib.dpak", 'a', vec![]);
         let duplicate_catalog = SolverCatalog {
             schema_version: 1,
             packages: vec![same.clone(), same],
@@ -456,7 +494,7 @@ mod tests {
                 "app",
                 "1.0-1",
                 "x86_64",
-                "app.pkg",
+                "app.dpak",
                 'a',
                 vec![
                     dependency("lib", &[">=1.0-0"]),
@@ -478,7 +516,7 @@ mod tests {
                 "app",
                 "1.0-1",
                 "x86_64",
-                "app.pkg",
+                "app.dpak",
                 'a',
                 vec![dependency("app", &[])],
             )],
@@ -486,6 +524,18 @@ mod tests {
         assert!(matches!(
             catalog.validate(),
             Err(SolverCatalogError::SelfDependency(_))
+        ));
+    }
+
+    #[test]
+    fn rejects_invalid_target_abi() {
+        let catalog = SolverCatalog {
+            schema_version: 1,
+            packages: vec![package("lib", "1.0-1", "x86_64", "lib.dpak", 'a', vec![])],
+        };
+        assert!(matches!(
+            catalog.plan(&[DependencyRequirement::any("lib")], "x86_64", "../host"),
+            Err(SolverCatalogError::InvalidAbi(_))
         ));
     }
 
