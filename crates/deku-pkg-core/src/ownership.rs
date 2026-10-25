@@ -62,14 +62,26 @@ pub struct InstallOwnershipAssessment {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum OwnershipError {
-    MetadataTooLarge { size: usize, limit: usize },
+    MetadataTooLarge {
+        size: usize,
+        limit: usize,
+    },
     InvalidJson(String),
     UnsupportedSchema,
-    TooManyPackages { count: usize, limit: usize },
-    TooManyFiles { count: usize, limit: usize },
+    TooManyPackages {
+        count: usize,
+        limit: usize,
+    },
+    TooManyFiles {
+        count: usize,
+        limit: usize,
+    },
     DuplicatePackage(String),
     UnsortedPackages,
-    InvalidPackageManifest { package: String, reason: String },
+    InvalidPackageManifest {
+        package: String,
+        reason: String,
+    },
     FileAlreadyOwned {
         path: String,
         first_package: String,
@@ -189,7 +201,7 @@ impl InstalledDatabase {
         let mut previous_name: Option<&str> = None;
         for record in &self.packages {
             if let Some(previous) = previous_name {
-                if previous == record.package.name {
+                if previous == record.package.name.as_str() {
                     return Err(OwnershipError::DuplicatePackage(
                         record.package.name.clone(),
                     ));
@@ -200,12 +212,12 @@ impl InstalledDatabase {
             }
             previous_name = Some(&record.package.name);
 
-            total_files = total_files
-                .checked_add(record.files.len())
-                .ok_or(OwnershipError::TooManyFiles {
+            total_files = total_files.checked_add(record.files.len()).ok_or(
+                OwnershipError::TooManyFiles {
                     count: usize::MAX,
                     limit: MAX_INSTALLED_FILES,
-                })?;
+                },
+            )?;
             if total_files > MAX_INSTALLED_FILES {
                 return Err(OwnershipError::TooManyFiles {
                     count: total_files,
@@ -216,10 +228,12 @@ impl InstalledDatabase {
             record
                 .as_manifest()
                 .validate()
-                .map_err(|error: ArchiveError| OwnershipError::InvalidPackageManifest {
-                    package: record.package.name.clone(),
-                    reason: error.to_string(),
-                })?;
+                .map_err(
+                    |error: ArchiveError| OwnershipError::InvalidPackageManifest {
+                        package: record.package.name.clone(),
+                        reason: error.to_string(),
+                    },
+                )?;
         }
         Ok(())
     }
@@ -280,12 +294,7 @@ impl InstalledDatabase {
                 Some(existing) if entry.kind != existing.entry.kind => {
                     return Err(OwnershipError::PathTypeConflict {
                         path: entry.path.clone(),
-                        first_package: existing
-                            .owners
-                            .iter()
-                            .next()
-                            .cloned()
-                            .unwrap_or_default(),
+                        first_package: existing.owners.iter().next().cloned().unwrap_or_default(),
                         second_package: incoming.package.name.clone(),
                     });
                 }
@@ -353,9 +362,7 @@ impl FileOwnershipIndex {
     }
 }
 
-fn build_index(
-    packages: &[InstalledPackageRecord],
-) -> Result<FileOwnershipIndex, OwnershipError> {
+fn build_index(packages: &[InstalledPackageRecord]) -> Result<FileOwnershipIndex, OwnershipError> {
     let mut index = FileOwnershipIndex::default();
 
     for record in packages {
@@ -442,7 +449,11 @@ mod tests {
     use crate::package_archive::{PackageInputEntry, encode_archive, inspect_archive};
     use std::io::Cursor;
 
-    fn manifest(name: &str, version: &str, entries: Vec<PackageInputEntry>) -> PackageArchiveManifest {
+    fn manifest(
+        name: &str,
+        version: &str,
+        entries: Vec<PackageInputEntry>,
+    ) -> PackageArchiveManifest {
         let package = PackageInfo {
             name: name.to_string(),
             version: version.to_string(),
@@ -513,7 +524,9 @@ mod tests {
         );
         let database =
             InstalledDatabase::from_manifests(1, [first.clone()]).expect("valid existing database");
-        let assessment = database.assess_install(&second).expect("shared directory allowed");
+        let assessment = database
+            .assess_install(&second)
+            .expect("shared directory allowed");
         assert_eq!(assessment.shared_directories, vec!["usr/bin"]);
         assert_eq!(assessment.paths_to_claim, vec!["usr/bin/b"]);
         assert!(!assessment.replacing_existing_version);
@@ -532,11 +545,7 @@ mod tests {
     #[test]
     fn detects_file_as_parent_conflicts_across_packages() {
         let file_parent = manifest("parent", "1.0-1", vec![file("usr/bin", b"not-a-directory")]);
-        let descendant = manifest(
-            "child",
-            "1.0-1",
-            vec![file("usr/bin/tool", b"tool")],
-        );
+        let descendant = manifest("child", "1.0-1", vec![file("usr/bin/tool", b"tool")]);
         assert!(matches!(
             InstalledDatabase::from_manifests(1, [file_parent, descendant]),
             Err(OwnershipError::FileParentConflict { .. })
@@ -545,10 +554,16 @@ mod tests {
 
     #[test]
     fn upgrades_can_replace_own_paths_but_not_another_packages_paths() {
-        let old = manifest("app", "1.0-1", vec![file("usr/bin/app", b"v1"), file("usr/share/old", b"old")]);
+        let old = manifest(
+            "app",
+            "1.0-1",
+            vec![file("usr/bin/app", b"v1"), file("usr/share/old", b"old")],
+        );
         let database = InstalledDatabase::from_manifests(8, [old]).expect("existing database");
         let upgraded = manifest("app", "2.0-1", vec![file("usr/bin/app", b"v2")]);
-        let assessment = database.assess_install(&upgraded).expect("upgrade can replace own path");
+        let assessment = database
+            .assess_install(&upgraded)
+            .expect("upgrade can replace own path");
         assert!(assessment.replacing_existing_version);
         assert_eq!(assessment.database_generation, 8);
         assert_eq!(assessment.paths_to_claim, vec!["usr/bin/app"]);
@@ -583,7 +598,9 @@ mod tests {
         ));
 
         assert!(matches!(
-            InstalledDatabase::from_json(br#"{"schema_version":1,"generation":0,"packages":[],"extra":true}"#),
+            InstalledDatabase::from_json(
+                br#"{"schema_version":1,"generation":0,"packages":[],"extra":true}"#
+            ),
             Err(OwnershipError::InvalidJson(_))
         ));
     }
