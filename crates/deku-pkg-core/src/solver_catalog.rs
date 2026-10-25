@@ -203,9 +203,7 @@ impl SolverCatalog {
                     });
                 }
                 if dependency.name == package.name {
-                    return Err(SolverCatalogError::SelfDependency(
-                        package.name.clone(),
-                    ));
+                    return Err(SolverCatalogError::SelfDependency(package.name.clone()));
                 }
                 if dependency.constraints.len() > MAX_SOLVER_CATALOG_CONSTRAINTS {
                     return Err(SolverCatalogError::TooManyConstraints {
@@ -387,10 +385,9 @@ mod tests {
 
     #[test]
     fn documented_example_is_valid_and_produces_a_pinned_plan() {
-        let catalog = SolverCatalog::from_json(include_bytes!(
-            "../../../examples/solver-catalog-v1.json"
-        ))
-        .expect("example catalog is valid");
+        let catalog =
+            SolverCatalog::from_json(include_bytes!("../../../examples/solver-catalog-v1.json"))
+                .expect("example catalog is valid");
         let plan = catalog
             .plan(&[DependencyRequirement::any("desktop-shell")], "x86_64")
             .expect("example plan resolves");
