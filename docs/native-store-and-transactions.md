@@ -1,6 +1,14 @@
 # Deku Package Manager: Native Store and Transaction Design
 
-**Status:** Proposed design for review. This document does not describe a production-ready package manager.
+**Status:** Design contract and implementation plan (reviewed 2026-10-25). Some primitives described here now exist in the Rust prototype, but this document does not describe a production-ready package manager.
+
+## Implemented prototype primitives (2026-10-25)
+
+The branch contains an original DPAK v1 archive with streaming verification, deterministic DESTDIR packaging, verified extraction to an existing empty staging directory, an ABI-aware named-dependency resolver, a TUF-backed target verification/fetch adapter, a SHA-256 content-addressed blob store, a durable transaction-journal store, and a strict installed-database model with a pure file-ownership index.
+
+The ownership preflight can detect duplicate regular-file owners, file/directory type conflicts, file-as-parent conflicts, and mismatched modes for shared directories. It can assess an upgrade while excluding the prior version of the same package. It does not inspect or modify actual live filesystem ownership, remove files, activate a system generation, or perform rollback. The installed database currently has strict in-memory/JSON validation; durable database publishing and reconciliation against the filesystem are not yet implemented.
+
+The journal store serializes journal saves using an advisory lock and refuses stale/divergent history updates. This lock protects journal writes only; it is not yet a transaction-wide lock around acquisition, staging, activation and recovery. The TUF client uses top-level targets only: the selected `tough` version documents that delegated target roles and TAP 4 are not supported. Do not publish split/delegated official catalogs until that support is implemented and tested.
 
 ## Goals
 
