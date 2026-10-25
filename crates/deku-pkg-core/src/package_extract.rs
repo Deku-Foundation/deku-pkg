@@ -12,8 +12,8 @@ use crate::package_archive::{
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
-use std::path::{Component, Path, PathBuf};
 use sha2::{Digest, Sha256};
+use std::path::{Component, Path, PathBuf};
 
 const HEADER_LEN: usize = 20;
 const HASH_BUFFER_BYTES: usize = 64 * 1024;
@@ -109,11 +109,16 @@ fn validate_empty_destination(path: &Path) -> Result<PathBuf, ExtractionError> {
         path: canonical.display().to_string(),
         message: error.to_string(),
     })?;
-    if entries.next().transpose().map_err(|error| ExtractionError::Io {
-        operation: "read extraction destination contents",
-        path: canonical.display().to_string(),
-        message: error.to_string(),
-    })?.is_some() {
+    if entries
+        .next()
+        .transpose()
+        .map_err(|error| ExtractionError::Io {
+            operation: "read extraction destination contents",
+            path: canonical.display().to_string(),
+            message: error.to_string(),
+        })?
+        .is_some()
+    {
         return Err(ExtractionError::DestinationNotEmpty);
     }
     Ok(canonical)
@@ -165,25 +170,16 @@ fn extract_verified<R: Read + Seek>(
             let full_path = root.join(&relative);
             let relative_name = entry.path.clone();
             if created_directory_names.contains(&relative_name) {
-                let metadata = fs::symlink_metadata(&full_path).map_err(|error| io_error(
-                    "inspect staged directory",
-                    &full_path,
-                    error,
-                ))?;
+                let metadata = fs::symlink_metadata(&full_path)
+                    .map_err(|error| io_error("inspect staged directory", &full_path, error))?;
                 if !metadata.file_type().is_dir() || metadata.file_type().is_symlink() {
                     return Err(ExtractionError::UnsafeDestination);
                 }
             } else {
-                fs::create_dir(&full_path).map_err(|error| io_error(
-                    "create staged directory",
-                    &full_path,
-                    error,
-                ))?;
-                set_mode(&full_path, 0o700).map_err(|error| io_error(
-                    "protect staged directory",
-                    &full_path,
-                    error,
-                ))?;
+                fs::create_dir(&full_path)
+                    .map_err(|error| io_error("create staged directory", &full_path, error))?;
+                set_mode(&full_path, 0o700)
+                    .map_err(|error| io_error("protect staged directory", &full_path, error))?;
                 created_directories.push(full_path);
                 created_directory_names.insert(relative_name.clone());
             }
@@ -220,16 +216,16 @@ fn extract_verified<R: Read + Seek>(
         let mut remaining = entry.size;
         while remaining > 0 {
             let chunk_len = remaining.min(buffer.len() as u64) as usize;
-            reader.read_exact(&mut buffer[..chunk_len]).map_err(|error| {
-                ExtractionError::Io {
+            reader
+                .read_exact(&mut buffer[..chunk_len])
+                .map_err(|error| ExtractionError::Io {
                     operation: "read package payload during extraction",
                     path: entry.path.clone(),
                     message: error.to_string(),
-                }
-            })?;
-            output.write_all(&buffer[..chunk_len]).map_err(|error| {
-                io_error("write staged package file", &output_path, error)
-            })?;
+                })?;
+            output
+                .write_all(&buffer[..chunk_len])
+                .map_err(|error| io_error("write staged package file", &output_path, error))?;
             hasher.update(&buffer[..chunk_len]);
             remaining -= chunk_len as u64;
             payload_total = payload_total
@@ -243,11 +239,9 @@ fn extract_verified<R: Read + Seek>(
                 entry.path
             )));
         }
-        output.sync_all().map_err(|error| io_error(
-            "sync staged package file",
-            &output_path,
-            error,
-        ))?;
+        output
+            .sync_all()
+            .map_err(|error| io_error("sync staged package file", &output_path, error))?;
         drop(output);
         file_modes.push((output_path, entry.mode));
     }
@@ -259,21 +253,26 @@ fn extract_verified<R: Read + Seek>(
     }
 
     let mut trailing = [0_u8; 1];
-    if reader.read(&mut trailing).map_err(|error| ExtractionError::Io {
-        operation: "check archive end during extraction",
-        path: "<archive>".to_string(),
-        message: error.to_string(),
-    })? != 0
+    if reader
+        .read(&mut trailing)
+        .map_err(|error| ExtractionError::Io {
+            operation: "check archive end during extraction",
+            path: "<archive>".to_string(),
+            message: error.to_string(),
+        })?
+        != 0
     {
         return Err(ExtractionError::SourceChanged(
             "archive has trailing data after verification".to_string(),
         ));
     }
-    let final_size = reader.seek(SeekFrom::End(0)).map_err(|error| ExtractionError::Io {
-        operation: "recheck archive size after extraction",
-        path: "<archive>".to_string(),
-        message: error.to_string(),
-    })?;
+    let final_size = reader
+        .seek(SeekFrom::End(0))
+        .map_err(|error| ExtractionError::Io {
+            operation: "recheck archive size after extraction",
+            path: "<archive>".to_string(),
+            message: error.to_string(),
+        })?;
     if final_size != verified.archive_size {
         return Err(ExtractionError::SourceChanged(
             "archive size changed during extraction".to_string(),
@@ -281,11 +280,8 @@ fn extract_verified<R: Read + Seek>(
     }
 
     for (path, mode) in file_modes {
-        set_mode(&path, mode).map_err(|error| io_error(
-            "apply staged file permissions",
-            &path,
-            error,
-        ))?;
+        set_mode(&path, mode)
+            .map_err(|error| io_error("apply staged file permissions", &path, error))?;
         File::open(&path)
             .and_then(|file| file.sync_all())
             .map_err(|error| io_error("sync staged file permissions", &path, error))?;
@@ -304,11 +300,8 @@ fn extract_verified<R: Read + Seek>(
             .collect::<Vec<_>>()
             .join("/");
         let mode = directory_modes.get(&key).copied().unwrap_or(0o755);
-        set_mode(path, mode).map_err(|error| io_error(
-            "apply staged directory permissions",
-            path,
-            error,
-        ))?;
+        set_mode(path, mode)
+            .map_err(|error| io_error("apply staged directory permissions", path, error))?;
     }
     File::open(root)
         .and_then(|directory| directory.sync_all())
@@ -332,27 +325,33 @@ fn read_and_compare_manifest<R: Read + Seek>(
     reader: &mut R,
     verified: &VerifiedArchive,
 ) -> Result<PackageArchiveManifest, ExtractionError> {
-    let size = reader.seek(SeekFrom::End(0)).map_err(|error| ExtractionError::Io {
-        operation: "recheck archive before extraction",
-        path: "<archive>".to_string(),
-        message: error.to_string(),
-    })?;
+    let size = reader
+        .seek(SeekFrom::End(0))
+        .map_err(|error| ExtractionError::Io {
+            operation: "recheck archive before extraction",
+            path: "<archive>".to_string(),
+            message: error.to_string(),
+        })?;
     if size != verified.archive_size {
         return Err(ExtractionError::SourceChanged(
             "archive size changed after verification".to_string(),
         ));
     }
-    reader.seek(SeekFrom::Start(0)).map_err(|error| ExtractionError::Io {
-        operation: "rewind archive before extraction",
-        path: "<archive>".to_string(),
-        message: error.to_string(),
-    })?;
+    reader
+        .seek(SeekFrom::Start(0))
+        .map_err(|error| ExtractionError::Io {
+            operation: "rewind archive before extraction",
+            path: "<archive>".to_string(),
+            message: error.to_string(),
+        })?;
     let mut header = [0_u8; HEADER_LEN];
-    reader.read_exact(&mut header).map_err(|error| ExtractionError::Io {
-        operation: "read archive header before extraction",
-        path: "<archive>".to_string(),
-        message: error.to_string(),
-    })?;
+    reader
+        .read_exact(&mut header)
+        .map_err(|error| ExtractionError::Io {
+            operation: "read archive header before extraction",
+            path: "<archive>".to_string(),
+            message: error.to_string(),
+        })?;
     if &header[..8] != b"DEKUPK01" {
         return Err(ExtractionError::SourceChanged(
             "archive magic changed after verification".to_string(),
@@ -373,11 +372,13 @@ fn read_and_compare_manifest<R: Read + Seek>(
     }
 
     let mut manifest_bytes = vec![0_u8; manifest_len];
-    reader.read_exact(&mut manifest_bytes).map_err(|error| ExtractionError::Io {
-        operation: "read archive manifest before extraction",
-        path: "<archive>".to_string(),
-        message: error.to_string(),
-    })?;
+    reader
+        .read_exact(&mut manifest_bytes)
+        .map_err(|error| ExtractionError::Io {
+            operation: "read archive manifest before extraction",
+            path: "<archive>".to_string(),
+            message: error.to_string(),
+        })?;
     let manifest: PackageArchiveManifest = serde_json::from_slice(&manifest_bytes)
         .map_err(|error| ExtractionError::Archive(ArchiveError::InvalidJson(error.to_string())))?;
     if manifest != verified.manifest {
@@ -391,9 +392,9 @@ fn read_and_compare_manifest<R: Read + Seek>(
 fn safe_relative_path(value: &str) -> Result<PathBuf, ExtractionError> {
     let path = Path::new(value);
     if path.is_absolute()
-        || path.components().any(|component| {
-            !matches!(component, Component::Normal(_))
-        })
+        || path
+            .components()
+            .any(|component| !matches!(component, Component::Normal(_)))
     {
         return Err(ExtractionError::Archive(ArchiveError::InvalidPath(
             value.to_string(),
@@ -420,10 +421,7 @@ fn ensure_parent_directories(
         if !relative_name.is_empty() {
             relative_name.push('/');
         }
-        relative_name.push_str(
-            name.to_str()
-                .ok_or(ExtractionError::UnsafeDestination)?,
-        );
+        relative_name.push_str(name.to_str().ok_or(ExtractionError::UnsafeDestination)?);
         current.push(name);
         match fs::symlink_metadata(&current) {
             Ok(metadata) => {
@@ -435,14 +433,22 @@ fn ensure_parent_directories(
                 }
             }
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                fs::create_dir(&current)
-                    .map_err(|error| io_error("create implicit package directory", &current, error))?;
-                set_mode(&current, 0o700)
-                    .map_err(|error| io_error("protect implicit package directory", &current, error))?;
+                fs::create_dir(&current).map_err(|error| {
+                    io_error("create implicit package directory", &current, error)
+                })?;
+                set_mode(&current, 0o700).map_err(|error| {
+                    io_error("protect implicit package directory", &current, error)
+                })?;
                 created_directories.push(current.clone());
                 created_directory_names.insert(relative_name.clone());
             }
-            Err(error) => return Err(io_error("inspect package parent directory", &current, error)),
+            Err(error) => {
+                return Err(io_error(
+                    "inspect package parent directory",
+                    &current,
+                    error,
+                ));
+            }
         }
     }
     Ok(())
@@ -578,11 +584,8 @@ mod tests {
         let temp = TestDirectory::new();
         let destination = temp.child("stage");
         let archive = fixture_archive();
-        let report = extract_archive_to_empty_directory(
-            &mut Cursor::new(&archive),
-            &destination,
-        )
-        .expect("extract fixture archive");
+        let report = extract_archive_to_empty_directory(&mut Cursor::new(&archive), &destination)
+            .expect("extract fixture archive");
         assert_eq!(report.package.name, "extract-fixture");
         assert_eq!(report.files_written, 1);
         assert_eq!(report.directories_created, 4);
@@ -618,11 +621,9 @@ mod tests {
         let temp = TestDirectory::new();
         let destination = temp.child("stage");
         fs::write(destination.join("keep"), b"keep").expect("create sentinel");
-        let error = extract_archive_to_empty_directory(
-            &mut Cursor::new(fixture_archive()),
-            &destination,
-        )
-        .expect_err("non-empty destination must be rejected");
+        let error =
+            extract_archive_to_empty_directory(&mut Cursor::new(fixture_archive()), &destination)
+                .expect_err("non-empty destination must be rejected");
         assert_eq!(error, ExtractionError::DestinationNotEmpty);
         assert_eq!(
             fs::read(destination.join("keep")).expect("read sentinel"),
@@ -639,9 +640,16 @@ mod tests {
         archive[payload_offset] ^= 0x01;
         assert!(matches!(
             extract_archive_to_empty_directory(&mut Cursor::new(archive), &destination),
-            Err(ExtractionError::Archive(ArchiveError::DigestMismatch { .. }))
+            Err(ExtractionError::Archive(
+                ArchiveError::DigestMismatch { .. }
+            ))
         ));
-        assert!(fs::read_dir(destination).expect("list stage").next().is_none());
+        assert!(
+            fs::read_dir(destination)
+                .expect("list stage")
+                .next()
+                .is_none()
+        );
     }
 
     #[cfg(unix)]
