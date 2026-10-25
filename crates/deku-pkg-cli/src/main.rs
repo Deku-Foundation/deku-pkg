@@ -1,6 +1,4 @@
-use deku_pkg_core::package_archive::{
-    MAX_PACKAGE_ARCHIVE_BYTES, PackageFileKind, inspect_archive,
-};
+use deku_pkg_core::package_archive::{MAX_PACKAGE_ARCHIVE_BYTES, PackageFileKind, inspect_archive};
 use deku_pkg_core::solver::{DependencyRequirement, VersionConstraint};
 use deku_pkg_core::solver_catalog::SolverCatalog;
 use deku_pkg_trust::RepositoryConfig;
