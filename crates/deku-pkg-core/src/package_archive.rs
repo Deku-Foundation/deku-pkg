@@ -667,6 +667,20 @@ mod tests {
     }
 
     #[test]
+    fn rejects_group_or_world_writable_directory_modes() {
+        let result = encode_archive(
+            package(),
+            vec![PackageInputEntry {
+                path: "shared".to_string(),
+                kind: PackageFileKind::Directory,
+                mode: 0o777,
+                content: Vec::new(),
+            }],
+        );
+        assert!(matches!(result, Err(ArchiveError::InvalidMode { .. })));
+    }
+
+    #[test]
     fn detects_payload_tampering() {
         let mut bytes = encode_archive(package(), inputs()).expect("encode");
         let manifest_len =
