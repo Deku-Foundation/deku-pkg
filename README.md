@@ -68,7 +68,7 @@ The Rust core includes an isolated blob store keyed by lowercase SHA-256. It enf
 
 The Rust core exposes an extraction primitive for archive v1. It requires an existing, empty staging directory with protected permissions, validates the entire archive before writing, re-checks the manifest and file digests during extraction, and attempts to remove paths it created if an error occurs. It rejects symlinks and special files because archive v1 does not represent them. This does not yet implement file ownership, conflicts against installed packages, package removal, live-root activation or system rollback.
 
-The transaction-journal store validates the current transaction-state schema and uses synced temporary files and atomic rename to persist journal updates. It is evidence for recovery, not proof that filesystem state matches the journal. A transaction executor still needs inter-process locking, ownership and collision indexes, crash-injection tests, reconciliation with real filesystem state, and explicit commit/rollback semantics.
+The transaction-journal store validates the current transaction-state schema, serializes saves with an advisory inter-process lock, rejects stale or divergent history updates, and uses synced temporary files plus atomic rename. Journal paths must be owned by the effective user and must not be group/world writable; journal opens avoid following symlinks. The journal remains evidence for recovery, not proof that filesystem state matches it. A transaction executor still needs a lock spanning the entire transaction, ownership and collision indexes, crash-injection tests, reconciliation with real filesystem state, and explicit commit/rollback semantics.
 
 ## Run checks
 
