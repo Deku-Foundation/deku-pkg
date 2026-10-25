@@ -46,7 +46,7 @@ Each archive command fully checks payload digests before displaying metadata or 
 The catalog under `examples/ is a test fixture: its SHA-256 values are placeholders, not real artifacts. Replace them with measured hashes and authenticate the catalog through the repository-trust layer before using any catalog as authoritative metadata.
 
 
-The `pack` command builds a native archive from an existing DESTDIR. It reads regular files and directories only, rejects symlinks and special filesystem objects, sorts package entries deterministically, hashes files before writing, and streams/re-hashes them while producing the archive. Output publication uses a temporary file and refuses to overwrite an existing output. The command does not run build scripts; it packages an already-populated DESTDIR and does not install the result.
+The `pack` command builds a native archive from an existing DESTDIR. It reads regular files and directories only, rejects symlinks and special filesystem objects, sorts package entries deterministically, hashes files before writing, and streams/re-hashes them while producing the archive. Output publication uses a private temporary file and refuses to overwrite an existing output; the command prints the full archive SHA-256 for catalog generation. Source and output directories must not be group/world writable. The command does not run build scripts; it packages an already-populated DESTDIR and does not install the result.
 
 ## Native version semantics
 
