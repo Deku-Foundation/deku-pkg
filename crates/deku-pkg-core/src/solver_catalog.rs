@@ -386,6 +386,20 @@ mod tests {
     }
 
     #[test]
+    fn documented_example_is_valid_and_produces_a_pinned_plan() {
+        let catalog = SolverCatalog::from_json(include_bytes!(
+            "../../../examples/solver-catalog-v1.json"
+        ))
+        .expect("example catalog is valid");
+        let plan = catalog
+            .plan(&[DependencyRequirement::any("desktop-shell")], "x86_64")
+            .expect("example plan resolves");
+        assert_eq!(plan.packages.len(), 2);
+        assert_eq!(plan.packages[0].name, "libc");
+        assert_eq!(plan.packages[1].name, "desktop-shell");
+    }
+
+    #[test]
     fn rejects_noncanonical_versions_and_invalid_artifact_digests() {
         let mut catalog = SolverCatalog {
             schema_version: 1,
