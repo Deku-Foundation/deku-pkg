@@ -4,22 +4,24 @@ Deku's package system is being developed as a native, Rust-based package manager
 
 ## Status
 
-**Experimental prototype — not a production package manager.** The repository has a metadata-only Python plan/catalog prototype and a Rust core that validates a bounded catalog, plans dependency order deterministically and checks artifact bytes against recorded SHA-256 digests. The Rust core does not fetch artifacts, authenticate repository publishers, unpack packages, execute scripts, install software, mutate the host or implement transaction recovery. No production repository or supported system package catalog is available.
+**Experimental prototype — not a production package manager.** The Rust workspace now contains a native archive format and streaming verifier, deterministic DESTDIR packer, ABI-aware version resolver, bounded catalog validation, TUF-backed repository trust adapter, content-addressed artifact store, verified artifact-fetch path, and extraction into an empty protected staging directory. A durable transaction-journal store is also present, but no transaction executor or live-system installer exists. There is no production repository or supported system package catalog.
 
 ## Current prototype layout
 
 - `deku_pkg/` — original Python plan/catalog prototype and command-line entry point.
-- crates/deku-pkg-core/ — Rust metadata model, bounded JSON parser, semantic validator, deterministic dependency planner, artifact-digest verifier and native archive v1 module (package_archive).
+- crates/deku-pkg-core/ — native archive, builder, staged extractor, version comparator, ABI-aware dependency solver, content store and transaction-journal primitives.
+- crates/deku-pkg-trust/ — TUF-backed metadata and target verification using the existing Rust TUF implementation.
+- crates/deku-pkg-cli/ — archive inspection, packaging, local/trusted planning and trusted fetch-to-store commands.
 - `docs/prototype-v0.md` — initial prototype scope and acceptance gates.
 - `docs/native-store-and-transactions.md` — proposed immutable store, repository trust, transaction states and compatibility policy.
 - `examples/catalog.json` — illustrative Python prototype catalog.
 
-The Rust core has no root privileges or host mutation APIs. Its streaming artifact verifier checks data integrity against the digest recorded in metadata; SHA-256 alone does not authenticate the repository publisher. A signed repository format, authenticated metadata freshness, key rotation/revocation, and the network client are not implemented yet.
+The core does not need root privileges and does not mutate a live system. The TUF adapter verifies repository metadata and target bytes against an out-of-band trusted root, with expiry and rollback-aware metadata state. Key rotation and recovery operations, delegated-target support, production repository operation and end-to-end release provenance remain separate operational gates. A digest alone is still not publisher authentication.
 
 
 ## Native archive v1
 
-The current development branch introduces an original Deku archive format with deterministic manifest ordering and a bounded streaming verifier. The manifest records package identity, ABI, license expression, runtime dependency names, file kinds, permission bits, byte sizes and SHA-256 digests. Version 1 permits regular files and directories only; it rejects traversal paths, duplicate entries, file/parent collisions, privileged mode bits and tampered payloads. It does not yet extract files, install packages, authenticate publishers by itself, or mutate the host. Repository publisher authentication remains the responsibility of the separate TUF-backed trust layer.
+The current development branch introduces an original Deku archive format with deterministic manifest ordering and a bounded streaming verifier. The manifest records package identity, ABI, license expression, runtime dependency names, file kinds, permission bits, byte sizes and SHA-256 digests. Version 1 permits regular files and directories only; it rejects traversal paths, duplicate entries, file/parent collisions, privileged mode bits, writable package directories and tampered payloads. The CLI can extract a verified archive to an existing empty protected staging directory. This is not a live-system installer; repository publisher authentication remains the responsibility of the separate TUF-backed trust layer.
 
 Implementation and design review: docs/architecture/native-package-engine-upstream-review.md.
 
@@ -30,6 +32,8 @@ cargo run -p deku-pkg -- inspect ./example.dpak
 cargo run -p deku-pkg -- verify ./example.dpak
 cargo run -p deku-pkg -- pack ./build/destdir ./out/sample-1.0-1-x86_64.dpak sample 1.0-1 x86_64 deku1-linux-gnu MIT libc zlib
 cargo run -p deku-pkg -- inspect ./out/sample-1.0-1-x86_64.dpak
+mkdir -m 700 ./var/sample-stage
+cargo run -p deku-pkg -- extract ./out/sample-1.0-1-x86_64.dpak ./var/sample-stage
 cargo run -p deku-pkg -- files ./example.dpak
 cargo run -p deku-pkg -- plan examples/solver-catalog-v1.json x86_64 deku1-linux-gnu 'desktop-shell>=1.0-1,<2.0-0'
 
@@ -38,12 +42,12 @@ cargo run -p deku-pkg -- trusted-plan ./trusted/root.json https://packages.examp
 cargo run -p deku-pkg -- trusted-fetch-plan ./trusted/root.json https://packages.example.invalid/metadata/ https://packages.example.invalid/targets/ ./var/tuf-state ./var/staging ./var/package-store catalogs/native-v1.json x86_64 deku1-linux-gnu 'desktop-shell>=1.0-1,<2.0-0'
 ```
 
-Each archive command fully checks payload digests before displaying metadata or paths. The read-only planner validates a bounded versioned catalog and prints a dependency-first plan pinned to exact artifact filenames and SHA-256 digests. Neither mode checks publisher authentication on its own; the planner does not install, extract, fetch, or change system state.
+Archive inspection and verification check payload digests before presenting metadata. The packer creates deterministic artifacts from an already-built DESTDIR; extract verifies the archive before copying files and rechecks payload digests while writing. Extraction requires an existing empty staging root controlled by the current user and applies restrictive checks to paths and directory modes. It is not suitable as a live-root installer. The local planner validates a bounded versioned catalog and prints a dependency-first plan pinned to exact artifact filenames and SHA-256 digests. Local planning does not authenticate publishers.
 `trusted-plan` verifies the out-of-band root and current TUF metadata using `deku-pkg-trust` before downloading the catalog target into the staging directory. It requires HTTPS base URLs, a persistent protected datastore, and an existing protected staging directory. The command produces a plan only. Before downloading the catalog it enforces a 16 MiB signed-target size ceiling; for every selected package it checks that a matching signed TUF target exists, that its signed SHA-256 matches the catalog digest, and that its signed size is within the native archive limit. It does not download package artifact bytes into the content store or install software. The `.invalid` hostname above is a documentation placeholder, not a working repository.
 
-`trusted-fetch-plan` continues beyond planning: it verifies every selected artifact against signed TUF target metadata and the catalog digest, downloads via the trust crate, checks that the archive manifest identity matches the selected name/version/architecture, then writes the verified bytes into the content-addressed object store and re-verifies the stored object. This is still **not an installer**: it does not unpack archives or write the live system. The package store path must already exist, be a real non-symlink directory, and not be group/world writable.
+`trusted-fetch-plan` continues beyond planning: it verifies every selected artifact against signed TUF target metadata and the catalog digest, downloads via the trust crate, checks that the archive manifest identity matches the selected name/version/architecture, then verifies the embedded package name, canonical version, architecture and ABI before writing the bytes into the content-addressed object store and re-verifying the stored object. This is still **not an installer**: it does not extract the fetched packages or write the live system. The package store path must already exist, be a real non-symlink directory, and not be group/world writable.
 
-The catalog under `examples/ is a test fixture: its SHA-256 values are placeholders, not real artifacts. Replace them with measured hashes and authenticate the catalog through the repository-trust layer before using any catalog as authoritative metadata.
+The catalog under `examples/` is a test fixture: its SHA-256 values are placeholders, not real artifacts. Replace them with measured hashes and authenticate the catalog through the repository-trust layer before using any catalog as authoritative metadata.
 
 
 The `pack` command builds a native archive from an existing DESTDIR. It reads regular files and directories only, rejects symlinks and special filesystem objects, sorts package entries deterministically, hashes files before writing, and streams/re-hashes them while producing the archive. Output publication uses a private temporary file and refuses to overwrite an existing output; the command prints the full archive SHA-256 for catalog generation. Source and output directories must not be group/world writable. The command does not run build scripts; it packages an already-populated DESTDIR and does not install the result.
@@ -54,11 +58,17 @@ The Rust core now includes a first Deku-native version comparator. It parses an 
 
 ## Native dependency resolver
 
-The Rust core now includes an initial pure, version-aware resolver. It supports equality and ordered version constraints, chooses the highest compatible package, filters candidates by target architecture, backtracks when constraints conflict, reports missing/conflicting requirements, and rejects dependency cycles before returning a dependency-first plan. Search-state, candidate, depth, and constraint limits are enforced. This is an initial named-dependency resolver; virtual provides, explicit conflicts, weak dependencies, installed-state reconciliation, repository trust integration, and execution of transactions are not implemented yet.
+The Rust core now includes an initial pure, version-aware resolver. It supports equality and ordered version constraints, chooses the highest compatible package, filters candidates by target architecture and ABI, backtracks when constraints conflict, reports unsatisfiable requirements, and rejects dependency cycles before returning a dependency-first plan. Search-state, candidate, depth, and constraint limits are enforced. This is an initial named-dependency resolver; virtual provides, explicit package conflicts, weak dependencies, installed-state reconciliation, and transaction execution are not implemented yet. Repository trust is supplied as a separate adapter rather than being embedded in the pure solver.
 
 ## Content-addressed object store
 
 The Rust core includes an isolated blob store keyed by lowercase SHA-256. It enforces an explicit maximum size, hashes input while streaming into a temporary file, publishes only after digest validation, uses no-overwrite hard-link publication, and re-verifies an existing object before deduplication. This module stores opaque blobs; it does not extract or install packages. It expects a pre-provisioned protected directory and is not a substitute for authenticated repository metadata.
+
+## Staged extraction and transaction journal
+
+The Rust core exposes an extraction primitive for archive v1. It requires an existing, empty staging directory with protected permissions, validates the entire archive before writing, re-checks the manifest and file digests during extraction, and attempts to remove paths it created if an error occurs. It rejects symlinks and special files because archive v1 does not represent them. This does not yet implement file ownership, conflicts against installed packages, package removal, live-root activation or system rollback.
+
+The transaction-journal store validates the current transaction-state schema and uses synced temporary files and atomic rename to persist journal updates. It is evidence for recovery, not proof that filesystem state matches the journal. A transaction executor still needs inter-process locking, ownership and collision indexes, crash-injection tests, reconciliation with real filesystem state, and explicit commit/rollback semantics.
 
 ## Run checks
 
