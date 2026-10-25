@@ -2,6 +2,7 @@ use deku_pkg_core::content_store::ContentStore;
 use deku_pkg_core::package_archive::PackageInfo;
 use deku_pkg_core::package_archive::{MAX_PACKAGE_ARCHIVE_BYTES, PackageFileKind, inspect_archive};
 use deku_pkg_core::package_builder::write_archive_from_directory;
+use deku_pkg_core::package_extract::extract_archive_to_empty_directory;
 use deku_pkg_core::solver::{DependencyRequirement, VersionConstraint};
 use deku_pkg_core::solver_catalog::SolverCatalog;
 use deku_pkg_trust::RepositoryConfig;
@@ -16,7 +17,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 fn print_usage() {
     println!(
-        "Usage:\n  deku-pkg pack <destdir> <output.dpak> <name> <version> <architecture> <abi> <license> [dependency...]\n  deku-pkg inspect <archive>\n  deku-pkg verify <archive>\n  deku-pkg files <archive>\n  deku-pkg plan <catalog.json> <x86_64|aarch64> <abi> <package[>=version,...]>...\n  deku-pkg trusted-plan <root.json> <metadata-url> <targets-url> <datastore> <staging> <catalog-target> <x86_64|aarch64> <abi> <package[>=version,...]>...\n  deku-pkg trusted-fetch-plan <root.json> <metadata-url> <targets-url> <datastore> <staging> <store> <catalog-target> <x86_64|aarch64> <abi> <package[>=version,...]>...\n  deku-pkg --version"
+        "Usage:\n  deku-pkg pack <destdir> <output.dpak> <name> <version> <architecture> <abi> <license> [dependency...]\n  deku-pkg extract <archive> <empty-staging-root>\n  deku-pkg inspect <archive>\n  deku-pkg verify <archive>\n  deku-pkg files <archive>\n  deku-pkg plan <catalog.json> <x86_64|aarch64> <abi> <package[>=version,...]>...\n  deku-pkg trusted-plan <root.json> <metadata-url> <targets-url> <datastore> <staging> <catalog-target> <x86_64|aarch64> <abi> <package[>=version,...]>...\n  deku-pkg trusted-fetch-plan <root.json> <metadata-url> <targets-url> <datastore> <staging> <store> <catalog-target> <x86_64|aarch64> <abi> <package[>=version,...]>...\n  deku-pkg --version"
     );
 }
 
@@ -952,6 +953,47 @@ fn run_trusted_fetch_plan(args: &[OsString]) -> ExitCode {
     ExitCode::SUCCESS
 }
 
+fn run_extract(args: &[OsString]) -> ExitCode {
+    if args.len() != 3 {
+        print_usage();
+        eprintln!("deku-pkg: extract requires one archive and one existing empty staging directory");
+        return ExitCode::from(2);
+    }
+
+    let archive_path = PathBuf::from(&args[1]);
+    let file = match File::open(&archive_path) {
+        Ok(file) => file,
+        Err(error) => {
+            eprintln!("deku-pkg: cannot open {}: {error}", archive_path.display());
+            return ExitCode::FAILURE;
+        }
+    };
+    let mut reader = BufReader::new(file);
+    let destination = PathBuf::from(&args[2]);
+    let report = match extract_archive_to_empty_directory(&mut reader, &destination) {
+        Ok(report) => report,
+        Err(error) => {
+            eprintln!("deku-pkg: staged extraction failed: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+
+    println!(
+        "Extracted {} {} ({}, ABI {}) into staging directory {}",
+        report.package.name,
+        report.package.version,
+        report.package.architecture,
+        report.package.abi,
+        destination.display()
+    );
+    println!("Files written: {}", report.files_written);
+    println!("Directories created: {}", report.directories_created);
+    println!("Payload bytes: {}", report.payload_bytes);
+    println!("Archive bytes: {}", report.archive_bytes);
+    println!("This is staged extraction only; no live system root was changed.");
+    ExitCode::SUCCESS
+}
+
 fn run(args: Vec<OsString>) -> ExitCode {
     if args.is_empty() {
         print_usage();
@@ -993,6 +1035,9 @@ fn run(args: Vec<OsString>) -> ExitCode {
     }
     if command == "pack" {
         return run_pack(&args);
+    }
+    if command == "extract" {
+        return run_extract(&args);
     }
     if !matches!(command, "inspect" | "verify" | "files") {
         print_usage();
