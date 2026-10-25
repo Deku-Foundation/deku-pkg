@@ -344,7 +344,7 @@ fn run_trusted_plan(args: &[OsString]) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let plan = match catalog.plan(&roots, architecture) {
+    let plan = match catalog.plan(&roots, architecture, target_abi) {
         Ok(plan) => plan,
         Err(error) => {
             eprintln!("deku-pkg: dependency resolution failed: {error}");
@@ -356,14 +356,16 @@ fn run_trusted_plan(args: &[OsString]) -> ExitCode {
     println!("Verified top-level repository targets: {target_count}");
     println!("Catalog target: {catalog_target}");
     println!("Target architecture: {architecture}");
+    println!("Target ABI: {target_abi}");
     println!("Packages in plan: {}", plan.packages.len());
     println!("Resolver states explored: {}", plan.explored_states);
     for package in &plan.packages {
         println!(
-            "{} {} {} {} sha256:{}",
+            "{} {} {} ABI:{} {} sha256:{}",
             package.name,
             package.version,
             package.architecture,
+            package.abi,
             package.artifact.file,
             package.artifact.sha256
         );
@@ -791,7 +793,7 @@ fn run_trusted_fetch_plan(args: &[OsString]) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let plan = match catalog.plan(&roots, architecture) {
+    let plan = match catalog.plan(&roots, architecture, target_abi) {
         Ok(plan) => plan,
         Err(error) => {
             eprintln!("deku-pkg: dependency resolution failed: {error}");
@@ -803,6 +805,7 @@ fn run_trusted_fetch_plan(args: &[OsString]) -> ExitCode {
     println!("Verified top-level repository targets: {target_count}");
     println!("Catalog target: {catalog_target}");
     println!("Target architecture: {architecture}");
+    println!("Target ABI: {target_abi}");
     println!("Packages in plan: {}", plan.packages.len());
     println!("Resolver states explored: {}", plan.explored_states);
 
