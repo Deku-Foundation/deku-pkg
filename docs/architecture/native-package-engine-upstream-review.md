@@ -41,6 +41,20 @@ Version 1 intentionally supports regular files and directories only. It rejects 
 
 The digest inside an archive proves only that its bytes match its manifest. It does not identify the publisher. A client must fetch the artifact using authenticated, fresh repository metadata from the existing trust layer and verify the downloaded artifact before asking the archive verifier to inspect it.
 
+
+## Native version ordering contract
+
+The new Rust core version module defines Deku's own ordering contract rather than claiming compatibility with a foreign package manager:
+
+- Syntax is [epoch:]upstream[-release]; epoch defaults to zero and release defaults to zero.
+- Numeric runs are compared numerically without converting long digit runs to machine integers.
+- Alphabetic runs compare lexically; punctuation separates runs.
+- A tilde (~) sorts before the matching base version, allowing prereleases such as 2.0~rc1 to sort before 2.0.
+- Explicit epochs reject leading zeroes and overflow; empty components, whitespace, and non-ASCII tokens are rejected.
+- Equality is defined by the comparator so versions that compare equal also compare equal as values.
+
+This is an RPM-inspired subset for a native contract, not RPM's full algorithm, Debian's dpkg algorithm, XBPS version semantics, or SemVer. Before recipe migration at scale, this contract must be stabilized with a cross-project corpus and property tests. Compatibility adapters must translate upstream version strings only when conversion is lossless; ambiguous versions must be rejected rather than silently reordered.
+
 ## Trust and licensing boundaries
 
 - Do not enable Void repositories, keys, or binary packages as Deku defaults.
