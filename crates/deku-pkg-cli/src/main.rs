@@ -47,7 +47,7 @@ fn parse_root_requirement(value: &str) -> Result<DependencyRequirement, String> 
 
     let operator_index = value
         .char_indices()
-        .find(|(_, character)| matches!(character, '<' | '>' | '='))
+        .find(|(_, character)| matches!(*character, '<' | '>' | '='))
         .map(|(index, _)| index);
 
     let Some(index) = operator_index else {
@@ -57,6 +57,9 @@ fn parse_root_requirement(value: &str) -> Result<DependencyRequirement, String> 
     let raw_constraints = &value[index..];
     if name.is_empty() {
         return Err("requirement is missing a package name".to_string());
+    }
+    if name.trim() != name {
+        return Err("package name cannot contain surrounding whitespace".to_string());
     }
 
     let constraints = raw_constraints
