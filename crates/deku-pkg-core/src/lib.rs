@@ -1189,3 +1189,6 @@ mod tests {
         );
     }
 }
+
+/// Deterministic native package archive v1 encoder and streaming verifier.
+pub mod package_archive;
