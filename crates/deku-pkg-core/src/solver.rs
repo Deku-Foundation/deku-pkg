@@ -89,10 +89,7 @@ impl DependencyRequirement {
         }
     }
 
-    pub fn constrained(
-        name: impl Into<String>,
-        constraints: Vec<VersionConstraint>,
-    ) -> Self {
+    pub fn constrained(name: impl Into<String>, constraints: Vec<VersionConstraint>) -> Self {
         Self {
             name: name.into(),
             constraints,
@@ -129,15 +126,39 @@ pub enum SolveError {
     InvalidTargetArchitecture(String),
     InvalidPackageName(String),
     UnsupportedArchitecture(String),
-    TooManyCandidates { count: usize, limit: usize },
-    TooManyRootRequirements { count: usize, limit: usize },
-    TooManyDependencies { package: String, count: usize, limit: usize },
-    TooManyConstraints { package: String, count: usize, limit: usize },
+    TooManyCandidates {
+        count: usize,
+        limit: usize,
+    },
+    TooManyRootRequirements {
+        count: usize,
+        limit: usize,
+    },
+    TooManyDependencies {
+        package: String,
+        count: usize,
+        limit: usize,
+    },
+    TooManyConstraints {
+        package: String,
+        count: usize,
+        limit: usize,
+    },
     InvalidConstraint(String),
-    DuplicateCandidate { name: String, version: String, architecture: String },
-    SearchLimitExceeded { limit: usize },
-    SearchDepthExceeded { limit: usize },
-    Unsatisfiable { packages: Vec<String> },
+    DuplicateCandidate {
+        name: String,
+        version: String,
+        architecture: String,
+    },
+    SearchLimitExceeded {
+        limit: usize,
+    },
+    SearchDepthExceeded {
+        limit: usize,
+    },
+    Unsatisfiable {
+        packages: Vec<String>,
+    },
     DependencyCycle(Vec<String>),
 }
 
@@ -159,10 +180,7 @@ fn valid_architecture(value: &str) -> bool {
     matches!(value, "x86_64" | "aarch64" | "noarch")
 }
 
-fn candidate_satisfies(
-    candidate: &PackageCandidate,
-    constraints: &[VersionConstraint],
-) -> bool {
+fn candidate_satisfies(candidate: &PackageCandidate, constraints: &[VersionConstraint]) -> bool {
     constraints
         .iter()
         .all(|constraint| constraint.matches(&candidate.version))
@@ -215,7 +233,11 @@ fn search(
     // Returning to the caller lets the earlier choice backtrack to another
     // version instead of accepting an inconsistent plan.
     for (name, index) in &state.selected {
-        let requirements = state.requirements.get(name).map(Vec::as_slice).unwrap_or(&[]);
+        let requirements = state
+            .requirements
+            .get(name)
+            .map(Vec::as_slice)
+            .unwrap_or(&[]);
         if !candidate_satisfies(&catalog[*index], requirements) {
             failures.insert(name.clone());
             return Ok(None);
@@ -248,7 +270,10 @@ fn search(
             return Ok(None);
         }
 
-        if best.as_ref().is_none_or(|(_, current)| choices.len() < current.len()) {
+        if best
+            .as_ref()
+            .is_none_or(|(_, current)| choices.len() < current.len())
+        {
             best = Some((name.clone(), choices));
         }
     }
@@ -443,7 +468,10 @@ pub fn resolve(
                 architecture: candidate.architecture.clone(),
             });
         }
-        by_name.entry(candidate.name.clone()).or_default().push(index);
+        by_name
+            .entry(candidate.name.clone())
+            .or_default()
+            .push(index);
     }
 
     for choices in by_name.values_mut() {
@@ -466,7 +494,11 @@ pub fn resolve(
                     };
                     left_arch.cmp(&right_arch)
                 })
-                .then_with(|| left_candidate.architecture.cmp(&right_candidate.architecture))
+                .then_with(|| {
+                    left_candidate
+                        .architecture
+                        .cmp(&right_candidate.architecture)
+                })
         });
     }
 
@@ -610,12 +642,27 @@ mod tests {
             "x86_64",
         )
         .expect("solver must backtrack to app 1");
-        let app = plan.packages.iter().find(|package| package.name == "app").unwrap();
-        let libc = plan.packages.iter().find(|package| package.name == "libc").unwrap();
+        let app = plan
+            .packages
+            .iter()
+            .find(|package| package.name == "app")
+            .unwrap();
+        let libc = plan
+            .packages
+            .iter()
+            .find(|package| package.name == "libc")
+            .unwrap();
         assert_eq!(app.version.canonical(), "1.0-1");
         assert_eq!(libc.version.canonical(), "1.9-1");
-        assert!(plan.packages.iter().position(|package| package.name == "libc")
-            < plan.packages.iter().position(|package| package.name == "app"));
+        assert!(
+            plan.packages
+                .iter()
+                .position(|package| package.name == "libc")
+                < plan
+                    .packages
+                    .iter()
+                    .position(|package| package.name == "app")
+        );
     }
 
     #[test]
@@ -625,28 +672,30 @@ mod tests {
             candidate("tool", "1.0-1", "x86_64", vec![]),
             candidate("tool", "1.0-1", "aarch64", vec![]),
         ];
-        let plan = resolve(
-            &catalog,
-            &[DependencyRequirement::any("tool")],
-            "x86_64",
-        )
-        .expect("architecture-aware resolution");
+        let plan = resolve(&catalog, &[DependencyRequirement::any("tool")], "x86_64")
+            .expect("architecture-aware resolution");
         assert_eq!(plan.packages[0].architecture, "x86_64");
 
-        let arm_plan = resolve(
-            &catalog,
-            &[DependencyRequirement::any("tool")],
-            "aarch64",
-        )
-        .expect("arm architecture-aware resolution");
+        let arm_plan = resolve(&catalog, &[DependencyRequirement::any("tool")], "aarch64")
+            .expect("arm architecture-aware resolution");
         assert_eq!(arm_plan.packages[0].architecture, "aarch64");
     }
 
     #[test]
     fn returns_dependency_first_order_and_is_independent_of_catalog_order() {
         let items = vec![
-            candidate("app", "1.0-1", "x86_64", vec![DependencyRequirement::any("lib")]),
-            candidate("lib", "1.0-1", "x86_64", vec![DependencyRequirement::any("base")]),
+            candidate(
+                "app",
+                "1.0-1",
+                "x86_64",
+                vec![DependencyRequirement::any("lib")],
+            ),
+            candidate(
+                "lib",
+                "1.0-1",
+                "x86_64",
+                vec![DependencyRequirement::any("base")],
+            ),
             candidate("base", "1.0-1", "noarch", vec![]),
         ];
         let first = resolve(&items, &[DependencyRequirement::any("app")], "x86_64").unwrap();
@@ -655,7 +704,11 @@ mod tests {
         let second = resolve(&reversed, &[DependencyRequirement::any("app")], "x86_64").unwrap();
         assert_eq!(first, second);
         assert_eq!(
-            first.packages.iter().map(|package| package.name.as_str()).collect::<Vec<_>>(),
+            first
+                .packages
+                .iter()
+                .map(|package| package.name.as_str())
+                .collect::<Vec<_>>(),
             vec!["base", "lib", "app"]
         );
     }
@@ -676,7 +729,11 @@ mod tests {
     fn rejects_duplicate_candidates_with_the_same_identity() {
         let item = candidate("lib", "1.0-1", "x86_64", vec![]);
         assert!(matches!(
-            resolve(&[item.clone(), item], &[DependencyRequirement::any("lib")], "x86_64"),
+            resolve(
+                &[item.clone(), item],
+                &[DependencyRequirement::any("lib")],
+                "x86_64"
+            ),
             Err(SolveError::DuplicateCandidate { .. })
         ));
     }
@@ -684,8 +741,18 @@ mod tests {
     #[test]
     fn detects_dependency_cycles_instead_of_returning_an_install_order() {
         let catalog = vec![
-            candidate("a", "1.0-1", "x86_64", vec![DependencyRequirement::any("b")]),
-            candidate("b", "1.0-1", "x86_64", vec![DependencyRequirement::any("a")]),
+            candidate(
+                "a",
+                "1.0-1",
+                "x86_64",
+                vec![DependencyRequirement::any("b")],
+            ),
+            candidate(
+                "b",
+                "1.0-1",
+                "x86_64",
+                vec![DependencyRequirement::any("a")],
+            ),
         ];
         assert!(matches!(
             resolve(&catalog, &[DependencyRequirement::any("a")], "x86_64"),
@@ -696,16 +763,22 @@ mod tests {
     #[test]
     fn backtracks_away_from_a_cyclic_newer_version() {
         let catalog = vec![
-            candidate("a", "2.0-1", "x86_64", vec![DependencyRequirement::any("b")]),
+            candidate(
+                "a",
+                "2.0-1",
+                "x86_64",
+                vec![DependencyRequirement::any("b")],
+            ),
             candidate("a", "1.0-1", "x86_64", vec![]),
-            candidate("b", "1.0-1", "x86_64", vec![DependencyRequirement::any("a")]),
+            candidate(
+                "b",
+                "1.0-1",
+                "x86_64",
+                vec![DependencyRequirement::any("a")],
+            ),
         ];
-        let plan = resolve(
-            &catalog,
-            &[DependencyRequirement::any("a")],
-            "x86_64",
-        )
-        .expect("resolver should select a non-cyclic version");
+        let plan = resolve(&catalog, &[DependencyRequirement::any("a")], "x86_64")
+            .expect("resolver should select a non-cyclic version");
         assert_eq!(plan.packages.len(), 1);
         assert_eq!(plan.packages[0].name, "a");
         assert_eq!(plan.packages[0].version.canonical(), "1.0-1");
@@ -735,11 +808,7 @@ mod tests {
             candidate("lib", "1.0-1", "x86_64", vec![]),
         ];
         assert!(matches!(
-            resolve(
-                &catalog,
-                &[DependencyRequirement::any("app")],
-                "x86_64"
-            ),
+            resolve(&catalog, &[DependencyRequirement::any("app")], "x86_64"),
             Err(SolveError::Unsatisfiable { .. })
         ));
     }
