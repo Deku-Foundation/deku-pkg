@@ -55,6 +55,8 @@ The new Rust core version module defines Deku's own ordering contract rather tha
 
 This is an RPM-inspired subset for a native contract, not RPM's full algorithm, Debian's dpkg algorithm, XBPS version semantics, or SemVer. Before recipe migration at scale, this contract must be stabilized with a cross-project corpus and property tests. Compatibility adapters must translate upstream version strings only when conversion is lossless; ambiguous versions must be rejected rather than silently reordered.
 
+The core now also includes a pure backtracking resolver for named packages and version constraints. It selects the highest compatible version, prefers the target architecture over noarch for equal versions, applies a fail-first deterministic search strategy, and rejects cycles before producing a dependency-first plan. Search limits are explicit. It does not yet support provides/conflicts, weak dependencies, repository lookup, installed-state reconciliation, or transaction execution.
+
 ## Trust and licensing boundaries
 
 - Do not enable Void repositories, keys, or binary packages as Deku defaults.
