@@ -44,6 +44,10 @@ The Rust core now includes a first Deku-native version comparator. It parses an 
 
 The Rust core now includes an initial pure, version-aware resolver. It supports equality and ordered version constraints, chooses the highest compatible package, filters candidates by target architecture, backtracks when constraints conflict, reports missing/conflicting requirements, and rejects dependency cycles before returning a dependency-first plan. Search-state, candidate, depth, and constraint limits are enforced. This is an initial named-dependency resolver; virtual provides, explicit conflicts, weak dependencies, installed-state reconciliation, repository trust integration, and execution of transactions are not implemented yet.
 
+## Content-addressed object store
+
+The Rust core includes an isolated blob store keyed by lowercase SHA-256. It enforces an explicit maximum size, hashes input while streaming into a temporary file, publishes only after digest validation, uses no-overwrite hard-link publication, and re-verifies an existing object before deduplication. This module stores opaque blobs; it does not extract or install packages. It expects a pre-provisioned protected directory and is not a substitute for authenticated repository metadata.
+
 ## Run checks
 
 Rust core tests and lint checks:
