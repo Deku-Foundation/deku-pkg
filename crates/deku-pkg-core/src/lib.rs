@@ -6,6 +6,7 @@ pub mod content_store;
 pub mod journal_store;
 pub mod package_archive;
 pub mod package_builder;
+pub mod package_extract;
 pub mod solver;
 pub mod solver_catalog;
 pub mod version;
