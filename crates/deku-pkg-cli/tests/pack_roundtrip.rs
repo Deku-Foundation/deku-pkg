@@ -93,6 +93,32 @@ fn pack_cli_emits_a_verifiable_archive_and_refuses_overwrite() {
     assert!(String::from_utf8_lossy(&inspected.stdout).contains("fixture"));
     assert!(String::from_utf8_lossy(&inspected.stdout).contains("deku1-linux-gnu"));
 
+    let stage = project.0.join("stage");
+    fs::create_dir(&stage).expect("create empty staging root");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&stage, fs::Permissions::from_mode(0o700))
+            .expect("protect empty staging root");
+    }
+    let extracted = Command::new(env!("CARGO_BIN_EXE_deku-pkg"))
+        .arg("extract")
+        .arg(&archive_path)
+        .arg(&stage)
+        .current_dir(&project.0)
+        .output()
+        .expect("run staged extractor");
+    assert!(
+        extracted.status.success(),
+        "extract failed: {}",
+        String::from_utf8_lossy(&extracted.stderr)
+    );
+    assert_eq!(
+        fs::read(stage.join("usr/bin/fixture")).expect("read staged file"),
+        b"hello from a Deku native package"
+    );
+    assert!(String::from_utf8_lossy(&extracted.stdout).contains("staged extraction only"));
+
     let repeated = run_pack(&project, &destdir, &archive_path);
     assert!(
         !repeated.status.success(),
