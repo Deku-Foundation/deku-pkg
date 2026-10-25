@@ -4,12 +4,12 @@ Deku's package system is being developed as a native, Rust-based package manager
 
 ## Status
 
-**Experimental prototype — not a production package manager.** The Rust workspace now contains a native archive format and streaming verifier, deterministic DESTDIR packer, ABI-aware version resolver, bounded catalog validation, TUF-backed repository trust adapter, content-addressed artifact store, verified artifact-fetch path, and extraction into an empty protected staging directory. A durable transaction-journal store is also present, but no transaction executor or live-system installer exists. There is no production repository or supported system package catalog.
+**Experimental prototype — not a production package manager.** The Rust workspace now contains a native archive format and streaming verifier, deterministic DESTDIR packer, ABI-aware version resolver, bounded catalog validation, TUF-backed repository trust adapter, content-addressed artifact store, verified artifact-fetch path, extraction into an empty protected staging directory, and an installed-package database with pure file-ownership preflight. A durable transaction-journal store is also present, but no transaction executor or live-system installer exists. There is no production repository or supported system package catalog.
 
 ## Current prototype layout
 
 - `deku_pkg/` — original Python plan/catalog prototype and command-line entry point.
-- crates/deku-pkg-core/ — native archive, builder, staged extractor, version comparator, ABI-aware dependency solver, content store and transaction-journal primitives.
+- crates/deku-pkg-core/ — native archive, builder, staged extractor, version comparator, ABI-aware dependency solver, installed database/file-ownership preflight, content store and transaction-journal primitives.
 - crates/deku-pkg-trust/ — TUF-backed metadata and target verification using the existing Rust TUF implementation.
 - crates/deku-pkg-cli/ — archive inspection, packaging, local/trusted planning and trusted fetch-to-store commands.
 - `docs/prototype-v0.md` — initial prototype scope and acceptance gates.
@@ -66,9 +66,9 @@ The Rust core includes an isolated blob store keyed by lowercase SHA-256. It enf
 
 ## Staged extraction and transaction journal
 
-The Rust core exposes an extraction primitive for archive v1. It requires an existing, empty staging directory with protected permissions, validates the entire archive before writing, re-checks the manifest and file digests during extraction, and attempts to remove paths it created if an error occurs. It rejects symlinks and special files because archive v1 does not represent them. This does not yet implement file ownership, conflicts against installed packages, package removal, live-root activation or system rollback.
+The Rust core exposes an extraction primitive for archive v1. It requires an existing, empty staging directory with protected permissions, validates the entire archive before writing, re-checks the manifest and file digests during extraction, and attempts to remove paths it created if an error occurs. It rejects symlinks and special files because archive v1 does not represent them. A pure installed-database and file-ownership preflight now detects duplicate file owners, file/parent conflicts, type collisions, and mismatched modes for shared directories. This is metadata-only: it does not reconcile recorded owners with the actual filesystem, remove package files, activate a live root, or roll a system back.
 
-The transaction-journal store validates the current transaction-state schema, serializes saves with an advisory inter-process lock, rejects stale or divergent history updates, and uses synced temporary files plus atomic rename. Journal paths must be owned by the effective user and must not be group/world writable; journal opens avoid following symlinks. The journal remains evidence for recovery, not proof that filesystem state matches it. A transaction executor still needs a lock spanning the entire transaction, ownership and collision indexes, crash-injection tests, reconciliation with real filesystem state, and explicit commit/rollback semantics.
+The transaction-journal store validates the current transaction-state schema, serializes saves with an advisory inter-process lock, rejects stale or divergent history updates, and uses synced temporary files plus atomic rename. Journal paths must be owned by the effective user and must not be group/world writable; journal opens avoid following symlinks. The journal remains evidence for recovery, not proof that filesystem state matches it. A transaction executor still needs a lock spanning the entire transaction, integration of the ownership preflight with staged-tree and real-filesystem checks, crash-injection tests, reconciliation with actual filesystem state, and explicit commit/rollback semantics.
 
 ## Run checks
 
@@ -95,7 +95,7 @@ The Python command prints a plan only; it does not install software. Run the tes
 - Prefer streaming verification with a caller-supplied maximum artifact size instead of buffering unbounded downloads.
 - Never execute arbitrary package-provided scripts as root during inspection or native installation.
 - Keep ordinary queries and planning unprivileged; privileged operations need a separately reviewed and narrow helper.
-- Stage into a temporary root before live-system changes; implement journaling and rollback only after interruption and recovery tests exist.
+- Stage into a temporary root and run the ownership preflight before live-system changes; implement activation and rollback only after interruption and recovery tests exist.
 - Keep RPM/DEB inspection and import as advanced, disabled-by-default compatibility paths. Flatpak should use upstream tooling rather than a second implementation.
 
 ## Required milestones before system use
