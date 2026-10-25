@@ -500,6 +500,46 @@ mod tests {
         ));
     }
 
+    struct MutatingWriter {
+        bytes: Vec<u8>,
+        path: PathBuf,
+        changed: bool,
+    }
+
+    impl Write for MutatingWriter {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            if !self.changed {
+                fs::write(&self.path, b"same length mutation").expect("mutate source file");
+                self.changed = true;
+            }
+            self.bytes.extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn detects_source_mutation_between_hashing_and_payload_streaming() {
+        let root = TestDirectory::new();
+        let source = root.0.join("sample.txt");
+        fs::write(&source, b"original source bytes").expect("write source fixture");
+        let mut output = MutatingWriter {
+            bytes: Vec::new(),
+            path: source,
+            changed: false,
+        };
+
+        assert!(matches!(
+            write_archive_from_directory(&root.0, package(), &mut output),
+            Err(BuilderError::Archive(ArchiveError::DigestMismatch { .. }))
+        ));
+        assert!(output.changed);
+        assert!(!output.bytes.is_empty());
+    }
+
     #[cfg(unix)]
     #[test]
     fn rejects_symlinks_inside_the_source_tree() {
