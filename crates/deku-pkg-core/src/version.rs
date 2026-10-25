@@ -10,7 +10,7 @@
 use std::cmp::Ordering;
 
 /// Parsed, comparable Deku package version.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone)]
 pub struct DekuVersion {
     epoch: u64,
     upstream: String,
@@ -136,6 +136,14 @@ impl DekuVersion {
             .then_with(|| compare_part(&self.release, &other.release))
     }
 }
+
+impl PartialEq for DekuVersion {
+    fn eq(&self, other: &Self) -> bool {
+        self.compare(other) == Ordering::Equal
+    }
+}
+
+impl Eq for DekuVersion {}
 
 impl std::fmt::Display for DekuVersion {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
