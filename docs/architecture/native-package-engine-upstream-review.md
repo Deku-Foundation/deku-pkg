@@ -95,9 +95,17 @@ No package is extracted or installed. This command establishes a complete **meta
 
 ## DESTDIR package builder
 
-The CLI now exposes `deku-pkg pack DESTDIR OUTPUT NAME VERSION ARCH ABI LICENSE [DEPENDENCY...]`. The builder performs a sorted filesystem walk without following symlinks, permits only regular files and directories, rejects device nodes/FIFOs and setuid/setgid/sticky modes, captures relative path/mode/size/SHA-256 metadata, and streams payload bytes in archive order. It reads every regular file once to calculate its digest and again while writing, checking size and digest in the second pass to detect changes. The CLI writes to a private same-directory temporary file, syncs it, sets the published artifact permissions, and hard-links to the destination without overwriting an existing path.
+The CLI now exposes `deku-pkg pack DESTDIR OUTPUT NAME VERSION ARCH ABI LICENSE [DEPENDENCY...]` and `deku-pkg extract ARCHIVE EMPTY-STAGING-ROOT`. The builder performs a sorted filesystem walk without following symlinks, permits only regular files and directories, rejects device nodes/FIFOs and setuid/setgid/sticky modes, captures relative path/mode/size/SHA-256 metadata, and streams payload bytes in archive order. It reads every regular file once to calculate its digest and again while writing, checking size and digest in the second pass to detect changes. The CLI writes to a private same-directory temporary file, syncs it, sets the published artifact permissions, and hard-links to the destination without overwriting an existing path.
 
 This makes native artifact creation possible from an already-populated DESTDIR. It does not execute package build scripts or assemble DESTDIR itself; that stays with the isolated worker in `deku-build`. It also does not sign artifacts or establish repository trust. The destination should be written by a controlled build worker with an isolated source/output directory, and build provenance/source pinning remain release gates.
+
+## Verified extraction into staging
+
+The native archive v1 path now includes a staging-only extractor. It verifies the archive before any destination mutation, requires an existing empty directory owned by the current effective user and not writable by group or others, then compares the manifest again and re-hashes each file while writing. It creates files with private temporary permissions, applies manifest file modes only after bytes are checked, applies directory modes deepest-first, and attempts best-effort cleanup of created paths after a write or digest failure.
+
+The extractor relies on the archive v1 rule that symlinks, hard links, device nodes and scriptlets do not exist. It rejects group/world-writable package directories so one package cannot install a directory that lets unprivileged users rewrite another package's descendants. Shared writable locations such as /tmp must be provisioned as system-owned runtime locations, not delivered as package-writable directories. This primitive writes only to an empty staging root and does not implement installed-file ownership, collision policy against existing packages, configuration migration, activation, live-root updates, or rollback.
+
+Validation is performed twice for different reasons: the first complete archive pass prevents a known-invalid archive from creating staged files; the second pass checks that the manifest and payload still match while bytes are being written. On failure, cleanup is best effort, not a claim of transaction atomicity or crash recovery. The live installer remains blocked on transaction locking, package ownership state, staged-tree validation, crash-injection tests, and a formal activation/rollback design.
 
 ## Trust and licensing boundaries
 
@@ -113,7 +121,7 @@ This makes native artifact creation possible from an already-populated DESTDIR. 
 2. Canonical repository snapshot: connect catalog package identities to artifact digests, versioned metadata, authenticated freshness and signed release provenance.
 3. Dependency model and solver: epoch/version/release semantics, bounded constraints, provides, conflicts, architecture/ABI filtering, backtracking or a rigorously specified resolver, and reproducible transaction plans.
 4. Content-addressed store: verify-then-persist, immutable objects, index integrity, lock/concurrency handling and safe garbage collection.
-5. Staged installer and journal executor: temporary root first; collision/ownership handling; crash injection; recovery that reconciles journal state with the filesystem; never claim atomicity without tests.
+5. Staged installer and journal executor: use the verified staging extractor only as a primitive; add collision/ownership handling, inter-process locking, crash injection, and recovery that reconciles journal state with the filesystem. Never claim atomicity without tests.
 6. Repository client and CLI: bounded downloads, redirect/IP safeguards, resumption, offline cache, structured output and clear plan/execute separation.
 7. Build/release integration: reviewed source pins in deku-recipes, isolated workers in deku-build, artifact manifests and independent rebuild comparisons, signatures issued in a separate trust domain.
 8. System integration: only after package tests pass, connect to deku-system and VM-test clean install, upgrade, remove, interruption recovery, rollback and boot recovery.
