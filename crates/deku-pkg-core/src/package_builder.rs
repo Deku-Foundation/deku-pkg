@@ -195,10 +195,11 @@ fn collect_entries(
                 mode,
             }));
         }
-        if kind == PackageFileKind::Directory
-            && directory_is_group_or_world_writable(&fs_metadata)
+        if kind == PackageFileKind::Directory && directory_is_group_or_world_writable(&fs_metadata)
         {
-            return Err(BuilderError::UnsafeSource(physical_path.display().to_string()));
+            return Err(BuilderError::UnsafeSource(
+                physical_path.display().to_string(),
+            ));
         }
 
         let (size, sha256) = match kind {
