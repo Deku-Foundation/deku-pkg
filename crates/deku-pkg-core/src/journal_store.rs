@@ -99,9 +99,7 @@ impl TransactionJournalStore {
         let destination = self.path_for(&journal.transaction_id)?;
         match fs::symlink_metadata(&destination) {
             Ok(metadata) => {
-                if !metadata.file_type().is_file() || metadata.file_type().is_symlink() {
-                    return Err(JournalStoreError::UnsafeJournalFile);
-                }
+                ensure_private_journal_file(&metadata)?;
             }
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
             Err(error) => {
@@ -153,9 +151,7 @@ impl TransactionJournalStore {
             operation: "inspect journal",
             message: error.to_string(),
         })?;
-        if !metadata.file_type().is_file() || metadata.file_type().is_symlink() {
-            return Err(JournalStoreError::UnsafeJournalFile);
-        }
+        ensure_private_journal_file(&metadata)?;
         if metadata.len() > MAX_JOURNAL_BYTES as u64 {
             return Err(JournalStoreError::JournalTooLarge {
                 size: usize::try_from(metadata.len()).unwrap_or(usize::MAX),
@@ -163,10 +159,21 @@ impl TransactionJournalStore {
             });
         }
 
-        let file = File::open(&path).map_err(|error| JournalStoreError::Io {
-            operation: "open journal",
+        let file = open_journal_file(&path).map_err(|error| {
+            if error.raw_os_error() == Some(libc::ELOOP) {
+                JournalStoreError::UnsafeJournalFile
+            } else {
+                JournalStoreError::Io {
+                    operation: "open journal without following symlinks",
+                    message: error.to_string(),
+                }
+            }
+        })?;
+        let opened_metadata = file.metadata().map_err(|error| JournalStoreError::Io {
+            operation: "inspect opened journal",
             message: error.to_string(),
         })?;
+        ensure_private_journal_file(&opened_metadata)?;
         let mut bytes = Vec::new();
         file.take((MAX_JOURNAL_BYTES + 1) as u64)
             .read_to_end(&mut bytes)
@@ -244,11 +251,50 @@ fn valid_id(value: &str) -> bool {
 
 #[cfg(unix)]
 fn ensure_private_directory(metadata: &fs::Metadata) -> Result<(), JournalStoreError> {
-    use std::os::unix::fs::PermissionsExt;
-    if metadata.permissions().mode() & 0o022 != 0 {
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+    // SAFETY: geteuid has no pointer arguments or preconditions.
+    let effective_uid = unsafe { libc::geteuid() as u32 };
+    if metadata.uid() != effective_uid || metadata.permissions().mode() & 0o022 != 0 {
         return Err(JournalStoreError::UnsafeDirectory);
     }
     Ok(())
+}
+
+#[cfg(unix)]
+fn ensure_private_journal_file(metadata: &fs::Metadata) -> Result<(), JournalStoreError> {
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+    // SAFETY: geteuid has no pointer arguments or preconditions.
+    let effective_uid = unsafe { libc::geteuid() as u32 };
+    if !metadata.is_file()
+        || metadata.uid() != effective_uid
+        || metadata.permissions().mode() & 0o022 != 0
+    {
+        return Err(JournalStoreError::UnsafeJournalFile);
+    }
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn ensure_private_journal_file(metadata: &fs::Metadata) -> Result<(), JournalStoreError> {
+    if !metadata.is_file() {
+        return Err(JournalStoreError::UnsafeJournalFile);
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn open_journal_file(path: &Path) -> std::io::Result<File> {
+    use std::os::unix::fs::OpenOptionsExt;
+    let mut options = OpenOptions::new();
+    options
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC);
+    options.open(path)
+}
+
+#[cfg(not(unix))]
+fn open_journal_file(path: &Path) -> std::io::Result<File> {
+    File::open(path)
 }
 
 #[cfg(not(unix))]
