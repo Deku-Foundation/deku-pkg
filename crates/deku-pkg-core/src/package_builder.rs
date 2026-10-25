@@ -189,19 +189,12 @@ fn collect_entries(
             PackageFileKind::File
         };
         let mode = source_mode(&fs_metadata, kind);
-        if mode & !0o777 != 0 {
+        if mode & !0o777 != 0 || mode & 0o022 != 0 {
             return Err(BuilderError::Archive(ArchiveError::InvalidMode {
                 path: path.clone(),
                 mode,
             }));
         }
-        if kind == PackageFileKind::Directory && directory_is_group_or_world_writable(&fs_metadata)
-        {
-            return Err(BuilderError::UnsafeSource(
-                physical_path.display().to_string(),
-            ));
-        }
-
         let (size, sha256) = match kind {
             PackageFileKind::Directory => (0, None),
             PackageFileKind::File => {
