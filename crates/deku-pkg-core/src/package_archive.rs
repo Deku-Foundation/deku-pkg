@@ -229,7 +229,7 @@ impl PackageArchiveManifest {
                 return Err(ArchiveError::InvalidPath(entry.path.clone()));
             }
             if let Some(prev) = previous {
-                if prev == entry.path {
+                if prev == entry.path.as_str() {
                     return Err(ArchiveError::DuplicatePath(entry.path.clone()));
                 }
                 if prev > entry.path.as_str() {
