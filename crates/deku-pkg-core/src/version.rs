@@ -34,6 +34,59 @@ impl std::fmt::Display for VersionError {
 
 impl std::error::Error for VersionError {}
 
+fn canonicalize_part(value: &str) -> String {
+    let bytes = value.as_bytes();
+    let mut tokens: Vec<(u8, String)> = Vec::new();
+    let mut i = 0;
+
+    while i < bytes.len() {
+        if bytes[i] == b'~' {
+            tokens.push((0, "~".to_string()));
+            i += 1;
+            continue;
+        }
+        if !bytes[i].is_ascii_alphanumeric() {
+            i += 1;
+            continue;
+        }
+
+        let numeric = bytes[i].is_ascii_digit();
+        let start = i;
+        while i < bytes.len()
+            && bytes[i].is_ascii_alphanumeric()
+            && bytes[i].is_ascii_digit() == numeric
+        {
+            i += 1;
+        }
+        let mut token = value[start..i].to_string();
+        if numeric {
+            let trimmed = token.trim_start_matches('0');
+            token = if trimmed.is_empty() {
+                "0".to_string()
+            } else {
+                trimmed.to_string()
+            };
+        }
+        tokens.push((if numeric { 2 } else { 1 }, token));
+    }
+
+    let mut output = String::new();
+    let mut previous_was_run = false;
+    for (kind, token) in tokens {
+        if kind == 0 {
+            output.push('~');
+            previous_was_run = false;
+            continue;
+        }
+        if previous_was_run && !output.ends_with('~') {
+            output.push('.');
+        }
+        output.push_str(&token);
+        previous_was_run = true;
+    }
+    output
+}
+
 fn valid_part(value: &str) -> bool {
     !value.is_empty()
         && value
@@ -102,8 +155,8 @@ impl DekuVersion {
 
         Ok(Self {
             epoch,
-            upstream: upstream.to_string(),
-            release: release.to_string(),
+            upstream: canonicalize_part(upstream),
+            release: canonicalize_part(release),
         })
     }
 
@@ -285,7 +338,10 @@ mod tests {
     #[test]
     fn punctuation_separates_runs_and_leading_zeroes_are_numeric() {
         assert_eq!(version("1.01-1"), version("1.1-1"));
+        assert_eq!(version("1.01-1").canonical(), "1.1-1");
         assert_eq!(version("1_2-1"), version("1.2-1"));
+        assert_eq!(version("1_2-1").canonical(), "1.2-1");
+        assert_eq!(version("1rc2-1").canonical(), "1.rc.2-1");
     }
 
     #[test]
