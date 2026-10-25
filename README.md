@@ -30,9 +30,14 @@ cargo run -p deku-pkg -- inspect ./example.dpak
 cargo run -p deku-pkg -- verify ./example.dpak
 cargo run -p deku-pkg -- files ./example.dpak
 cargo run -p deku-pkg -- plan examples/solver-catalog-v1.json x86_64 'desktop-shell>=1.0-1,<2.0-0'
+
+# Trusted planning from a TUF-authenticated repository (all paths must be provisioned)
+cargo run -p deku-pkg -- trusted-plan ./trusted/root.json https://packages.example.invalid/metadata/ https://packages.example.invalid/targets/ ./var/tuf-state ./var/staging catalogs/native-v1.json x86_64 'desktop-shell>=1.0-1,<2.0-0'
 ```
 
 Each archive command fully checks payload digests before displaying metadata or paths. The read-only planner validates a bounded versioned catalog and prints a dependency-first plan pinned to exact artifact filenames and SHA-256 digests. Neither mode checks publisher authentication on its own; the planner does not install, extract, fetch, or change system state.
+`trusted-plan` verifies the out-of-band root and current TUF metadata using `deku-pkg-trust` before downloading the catalog target into the staging directory. It requires HTTPS base URLs, a persistent protected datastore, and an existing protected staging directory. The command produces a plan only; it does not fetch or individually verify the planned package artifacts against the catalog yet, and it never installs software. The `.invalid` hostname above is a documentation placeholder, not a working repository.
+
 The catalog under `examples/` is a test fixture: its SHA-256 values are placeholders, not real artifacts. Replace them with measured hashes and authenticate the catalog through the repository-trust layer before using any catalog as authoritative metadata.
 
 
