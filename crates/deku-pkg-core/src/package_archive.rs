@@ -6,6 +6,7 @@
 //! package-controlled scripts. This module only encodes and verifies archives;
 //! it never writes to the host filesystem or executes package content.
 
+use super::version::DekuVersion;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
@@ -193,8 +194,10 @@ fn validate_package_info(package: &PackageInfo) -> Result<(), ArchiveError> {
     if !super::valid_name(&package.name) {
         return Err(ArchiveError::InvalidPackageName(package.name.clone()));
     }
-    if !super::valid_version(&package.version) {
-        return Err(ArchiveError::InvalidVersion(package.version.clone()));
+    let parsed_version = DekuVersion::parse(&package.version)
+        .map_err(|_| ArchiveError::InvalidVersion(package.name.clone()))?;
+    if parsed_version.canonical() != package.version {
+        return Err(ArchiveError::InvalidVersion(package.name.clone()));
     }
     if !matches!(
         package.architecture.as_str(),
@@ -331,6 +334,9 @@ pub fn encode_archive(
             limit: MAX_PACKAGE_FILES,
         });
     }
+    package.version = DekuVersion::parse(&package.version)
+        .map_err(|_| ArchiveError::InvalidVersion(package.name.clone()))?
+        .canonical();
     package.dependencies.sort();
 
     entries.sort_by(|left, right| left.path.cmp(&right.path));
