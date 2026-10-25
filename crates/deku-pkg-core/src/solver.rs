@@ -57,6 +57,9 @@ impl VersionConstraint {
         }
         let version = DekuVersion::parse(raw_version)
             .map_err(|_| SolveError::InvalidConstraint(value.to_string()))?;
+        if version.canonical() != raw_version {
+            return Err(SolveError::InvalidConstraint(value.to_string()));
+        }
         Ok(Self {
             comparison,
             version,
@@ -783,7 +786,7 @@ mod tests {
     fn parses_explicit_constraint_operators_and_rejects_ambiguous_tokens() {
         assert!(VersionConstraint::parse(">=1.0-1").is_ok());
         assert!(VersionConstraint::parse("=1.0-1").is_ok());
-        for invalid in ["", "1.0", "==1.0", ">= 1.0", "<=", ">2.0 "] {
+        for invalid in ["", "1.0", "==1.0", ">= 1.0", "<=", ">2.0 ", ">=1.01-1"] {
             assert!(
                 VersionConstraint::parse(invalid).is_err(),
                 "unexpectedly accepted {invalid}"
