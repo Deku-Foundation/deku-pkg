@@ -3,6 +3,7 @@
 //! It does not download, install, execute package scripts, or mutate the host.
 
 pub mod journal_store;
+pub mod package_archive;
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -1190,5 +1191,3 @@ mod tests {
     }
 }
 
-/// Deterministic native package archive v1 encoder and streaming verifier.
-pub mod package_archive;
