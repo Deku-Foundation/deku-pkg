@@ -23,6 +23,16 @@ The current development branch introduces an original Deku archive format with d
 
 Implementation and design review: docs/architecture/native-package-engine-upstream-review.md.
 
+The workspace also includes a read-only CLI for verified archive inspection:
+
+```sh
+cargo run -p deku-pkg -- inspect ./example.dpak
+cargo run -p deku-pkg -- verify ./example.dpak
+cargo run -p deku-pkg -- files ./example.dpak
+```
+
+Each command fully checks payload digests before displaying metadata or paths. The CLI does not install, extract, fetch, or change system state.
+
 ## Run checks
 
 Rust core tests and lint checks:
