@@ -658,17 +658,25 @@ mod tests {
     }
 
     #[test]
-    fn rejects_group_or_world_writable_directory_modes() {
-        let result = encode_archive(
-            package(),
-            vec![PackageInputEntry {
-                path: "shared".to_string(),
-                kind: PackageFileKind::Directory,
-                mode: 0o777,
-                content: Vec::new(),
-            }],
-        );
-        assert!(matches!(result, Err(ArchiveError::InvalidMode { .. })));
+    fn rejects_group_or_world_writable_file_and_directory_modes() {
+        for (path, kind, mode) in [
+            ("shared", PackageFileKind::Directory, 0o777),
+            ("shared-file", PackageFileKind::File, 0o666),
+        ] {
+            let result = encode_archive(
+                package(),
+                vec![PackageInputEntry {
+                    path: path.to_string(),
+                    kind,
+                    mode,
+                    content: Vec::new(),
+                }],
+            );
+            assert!(
+                matches!(result, Err(ArchiveError::InvalidMode { .. })),
+                "{path}"
+            );
+        }
     }
 
     #[test]
