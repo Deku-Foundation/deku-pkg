@@ -88,10 +88,7 @@ pub fn write_archive_from_directory<W: Write>(
     let manifest = PackageArchiveManifest {
         schema_version: 1,
         package,
-        files: entries
-            .iter()
-            .map(|entry| entry.metadata.clone())
-            .collect(),
+        files: entries.iter().map(|entry| entry.metadata.clone()).collect(),
     };
     let validated_payload = manifest.validate()?;
     if validated_payload != total_payload {
@@ -108,8 +105,8 @@ pub fn write_archive_from_directory<W: Write>(
         }));
     }
 
-    let manifest_len =
-        u32::try_from(manifest_bytes.len()).map_err(|_| BuilderError::Archive(ArchiveError::LengthOverflow))?;
+    let manifest_len = u32::try_from(manifest_bytes.len())
+        .map_err(|_| BuilderError::Archive(ArchiveError::LengthOverflow))?;
     let archive_size = HEADER_LEN
         .checked_add(u64::from(manifest_len))
         .and_then(|size| size.checked_add(total_payload))
@@ -176,9 +173,11 @@ fn collect_entries(
             .map_err(|_| BuilderError::UnsafeSource(physical_path.display().to_string()))?;
         let path = relative
             .to_str()
-            .ok_or_else(|| BuilderError::Archive(ArchiveError::InvalidPath(
-                "package path is not valid UTF-8".to_string(),
-            )))?
+            .ok_or_else(|| {
+                BuilderError::Archive(ArchiveError::InvalidPath(
+                    "package path is not valid UTF-8".to_string(),
+                ))
+            })?
             .replace(std::path::MAIN_SEPARATOR, "/");
 
         let kind = if fs_metadata.file_type().is_dir() {
@@ -327,11 +326,10 @@ fn copy_verified_payload<W: Write>(
 ) -> Result<(), BuilderError> {
     let display_path = &entry.metadata.path;
     let expected_size = entry.metadata.size;
-    let expected_digest = entry
-        .metadata
-        .sha256
-        .as_deref()
-        .ok_or_else(|| BuilderError::Archive(ArchiveError::InvalidDigest(display_path.clone())))?;
+    let expected_digest =
+        entry.metadata.sha256.as_deref().ok_or_else(|| {
+            BuilderError::Archive(ArchiveError::InvalidDigest(display_path.clone()))
+        })?;
     let mut file = open_regular_source(&entry.physical_path, display_path)?;
     let metadata = file.metadata().map_err(|error| BuilderError::Io {
         operation: "inspect package source before archive write",
@@ -398,8 +396,10 @@ mod tests {
     impl TestDirectory {
         fn new() -> Self {
             let count = COUNTER.fetch_add(1, Ordering::Relaxed);
-            let path = std::env::temp_dir()
-                .join(format!("deku-package-builder-{}-{count}", std::process::id()));
+            let path = std::env::temp_dir().join(format!(
+                "deku-package-builder-{}-{count}",
+                std::process::id()
+            ));
             fs::create_dir(&path).expect("create test root");
             Self(path)
         }
@@ -457,7 +457,13 @@ mod tests {
             verified.manifest.package.dependencies,
             vec!["libc".to_string(), "zlib".to_string()]
         );
-        assert!(verified.manifest.files.iter().any(|entry| entry.path == "usr/share/empty"));
+        assert!(
+            verified
+                .manifest
+                .files
+                .iter()
+                .any(|entry| entry.path == "usr/share/empty")
+        );
     }
 
     #[cfg(unix)]
