@@ -1,4 +1,6 @@
-use deku_pkg_core::package_archive::{PackageFileKind, inspect_archive};
+use deku_pkg_core::package_archive::{
+    MAX_PACKAGE_ARCHIVE_BYTES, PackageFileKind, inspect_archive,
+};
 use deku_pkg_core::solver::{DependencyRequirement, VersionConstraint};
 use deku_pkg_core::solver_catalog::SolverCatalog;
 use deku_pkg_trust::RepositoryConfig;
@@ -140,6 +142,35 @@ fn run_plan(args: &[OsString]) -> ExitCode {
         }
     };
 
+    // The signed catalog and signed targets metadata must agree on every
+    // planned artifact before the plan is advertised as repository-consistent.
+    for package in &plan.packages {
+        let target_info = match repository.target_info(&package.artifact.file) {
+            Ok(info) => info,
+            Err(error) => {
+                eprintln!(
+                    "deku-pkg: planned artifact {} is not authorized by TUF: {error}",
+                    package.artifact.file
+                );
+                return ExitCode::FAILURE;
+            }
+        };
+        if target_info.length > MAX_PACKAGE_ARCHIVE_BYTES {
+            eprintln!(
+                "deku-pkg: artifact {} exceeds the native archive size limit ({} > {})",
+                target_info.name, target_info.length, MAX_PACKAGE_ARCHIVE_BYTES
+            );
+            return ExitCode::FAILURE;
+        }
+        if target_info.sha256 != package.artifact.sha256 {
+            eprintln!(
+                "deku-pkg: SHA-256 mismatch between catalog and signed TUF target metadata for {}",
+                package.artifact.file
+            );
+            return ExitCode::FAILURE;
+        }
+    }
+
     println!("Target architecture: {architecture}");
     println!("Packages in plan: {}", plan.packages.len());
     println!("Resolver states explored: {}", plan.explored_states);
@@ -268,15 +299,24 @@ fn run_trusted_plan(args: &[OsString]) -> ExitCode {
         }
     };
 
+    const MAX_CATALOG_TARGET_BYTES: u64 = 16 * 1024 * 1024;
     let verified_target = runtime.block_on(async {
         let repository = config.load().await?;
         let target_count = repository.target_count();
+        let catalog_info = repository.target_info(catalog_target)?;
+        if catalog_info.length > MAX_CATALOG_TARGET_BYTES {
+            return Err(deku_pkg_trust::TrustError::TargetTooLarge {
+                name: catalog_info.name,
+                size: catalog_info.length,
+                limit: MAX_CATALOG_TARGET_BYTES,
+            });
+        }
         let path = repository
             .download_verified_target(catalog_target, &staging)
             .await?;
-        Ok::<_, deku_pkg_trust::TrustError>((target_count, path))
+        Ok::<_, deku_pkg_trust::TrustError>((repository, target_count, path))
     });
-    let (target_count, catalog_path) = match verified_target {
+    let (repository, target_count, catalog_path) = match verified_target {
         Ok(result) => result,
         Err(error) => {
             eprintln!("deku-pkg: TUF repository verification failed: {error}");
@@ -316,7 +356,10 @@ fn run_trusted_plan(args: &[OsString]) -> ExitCode {
         );
     }
     println!(
-        "Package artifacts have not been downloaded or individually checked against the catalog in this command."
+        "All planned artifacts exist in signed TUF metadata; signed SHA-256 values agree with the catalog."
+    );
+    println!(
+        "Package artifact bytes have not been downloaded or verified in the content store by this command."
     );
     println!("No package was extracted or installed.");
     ExitCode::SUCCESS
