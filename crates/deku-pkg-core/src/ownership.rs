@@ -391,10 +391,40 @@ fn expanded_entries(files: &[PackageFile]) -> Vec<PackageFile> {
 }
 
 fn build_index(packages: &[InstalledPackageRecord]) -> Result<FileOwnershipIndex, OwnershipError> {
-    let mut index = FileOwnershipIndex::default();
+    let expanded_packages = packages
+        .iter()
+        .map(|record| (record, expanded_entries(&record.files)))
+        .collect::<Vec<_>>();
 
-    for record in packages {
-        for entry in expanded_entries(&record.files).iter() {
+    // Detect file-as-parent conflicts before merging path identities. This
+    // preserves the most precise diagnostic when a file collides with a
+    // synthetic directory that another package needs as a parent.
+    let mut all_paths = BTreeSet::<String>::new();
+    let mut file_paths = BTreeSet::<String>::new();
+    for (_, entries) in &expanded_packages {
+        for entry in entries {
+            all_paths.insert(entry.path.clone());
+            if entry.kind == PackageFileKind::File {
+                file_paths.insert(entry.path.clone());
+            }
+        }
+    }
+    for path in &all_paths {
+        let mut parent = path.as_str();
+        while let Some(separator) = parent.rfind('/') {
+            parent = &parent[..separator];
+            if file_paths.contains(parent) {
+                return Err(OwnershipError::FileParentConflict {
+                    file: parent.to_string(),
+                    descendant: path.clone(),
+                });
+            }
+        }
+    }
+
+    let mut index = FileOwnershipIndex::default();
+    for (record, entries) in &expanded_packages {
+        for entry in entries {
             match index.paths.get_mut(&entry.path) {
                 None => {
                     index.paths.insert(
@@ -435,25 +465,6 @@ fn build_index(packages: &[InstalledPackageRecord]) -> Result<FileOwnershipIndex
                         second_package: record.package.name.clone(),
                     });
                 }
-            }
-        }
-    }
-
-    // Detect cross-package file-as-parent conflicts. Each individual archive
-    // is validated independently, so this check is needed for the combined tree.
-    for path in index.paths.keys() {
-        let mut parent = path.as_str();
-        while let Some(separator) = parent.rfind('/') {
-            parent = &parent[..separator];
-            if index
-                .paths
-                .get(parent)
-                .is_some_and(|entry| entry.entry.kind == PackageFileKind::File)
-            {
-                return Err(OwnershipError::FileParentConflict {
-                    file: parent.to_string(),
-                    descendant: path.clone(),
-                });
             }
         }
     }
