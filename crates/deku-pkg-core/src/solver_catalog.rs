@@ -6,12 +6,12 @@
 //! SHA-256. It is still metadata, not publisher authentication: callers must
 //! verify repository trust before treating it as an authoritative catalog.
 
+use crate::Artifact;
 use crate::solver::{
     DependencyRequirement, PackageCandidate, ResolutionPlan, ResolvedPackage, SolveError,
     VersionConstraint, resolve,
 };
 use crate::version::DekuVersion;
-use crate::Artifact;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -65,20 +65,42 @@ pub struct PinnedResolutionPlan {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SolverCatalogError {
-    MetadataTooLarge { size: usize, limit: usize },
+    MetadataTooLarge {
+        size: usize,
+        limit: usize,
+    },
     InvalidJson(String),
     UnsupportedSchema,
-    TooManyPackages { count: usize, limit: usize },
+    TooManyPackages {
+        count: usize,
+        limit: usize,
+    },
     InvalidPackageName(String),
     InvalidVersion(String),
     NonCanonicalVersion(String),
     UnsupportedArchitecture(String),
     InvalidArtifactFile(String),
     InvalidDigest(String),
-    TooManyDependencies { package: String, count: usize, limit: usize },
-    DuplicateDependency { package: String, dependency: String },
-    TooManyConstraints { package: String, dependency: String, count: usize, limit: usize },
-    DuplicatePackage { name: String, version: String, architecture: String },
+    TooManyDependencies {
+        package: String,
+        count: usize,
+        limit: usize,
+    },
+    DuplicateDependency {
+        package: String,
+        dependency: String,
+    },
+    TooManyConstraints {
+        package: String,
+        dependency: String,
+        count: usize,
+        limit: usize,
+    },
+    DuplicatePackage {
+        name: String,
+        version: String,
+        architecture: String,
+    },
     Resolution(SolveError),
 }
 
@@ -125,9 +147,7 @@ impl SolverCatalog {
         let mut identities = BTreeSet::<(String, DekuVersion, String)>::new();
         for package in &self.packages {
             if !super::valid_name(&package.name) {
-                return Err(SolverCatalogError::InvalidPackageName(
-                    package.name.clone(),
-                ));
+                return Err(SolverCatalogError::InvalidPackageName(package.name.clone()));
             }
             let version = DekuVersion::parse(&package.version)
                 .map_err(|_| SolverCatalogError::InvalidVersion(package.name.clone()))?;
@@ -160,11 +180,7 @@ impl SolverCatalog {
                 });
             }
 
-            if !identities.insert((
-                package.name.clone(),
-                version,
-                package.architecture.clone(),
-            )) {
+            if !identities.insert((package.name.clone(), version, package.architecture.clone())) {
                 return Err(SolverCatalogError::DuplicatePackage {
                     name: package.name.clone(),
                     version: package.version.clone(),
@@ -247,16 +263,13 @@ impl SolverCatalog {
         let candidates = self.candidates()?;
         let resolution: ResolutionPlan = resolve(&candidates, roots, target_architecture)?;
 
-        let mut by_identity = BTreeMap::<(String, DekuVersion, String), &SolverCatalogPackage>::new();
+        let mut by_identity =
+            BTreeMap::<(String, DekuVersion, String), &SolverCatalogPackage>::new();
         for package in &self.packages {
             let version = DekuVersion::parse(&package.version)
                 .map_err(|_| SolverCatalogError::InvalidVersion(package.name.clone()))?;
             by_identity.insert(
-                (
-                    package.name.clone(),
-                    version,
-                    package.architecture.clone(),
-                ),
+                (package.name.clone(), version, package.architecture.clone()),
                 package,
             );
         }
@@ -355,7 +368,10 @@ mod tests {
             .expect("create pinned plan");
 
         assert_eq!(
-            plan.packages.iter().map(|item| item.name.as_str()).collect::<Vec<_>>(),
+            plan.packages
+                .iter()
+                .map(|item| item.name.as_str())
+                .collect::<Vec<_>>(),
             vec!["lib", "app"]
         );
         assert_eq!(plan.packages[0].version.canonical(), "2.9-1");
@@ -367,14 +383,7 @@ mod tests {
     fn rejects_noncanonical_versions_and_invalid_artifact_digests() {
         let mut catalog = SolverCatalog {
             schema_version: 1,
-            packages: vec![package(
-                "lib",
-                "1.01-1",
-                "x86_64",
-                "lib.pkg",
-                'a',
-                vec![],
-            )],
+            packages: vec![package("lib", "1.01-1", "x86_64", "lib.pkg", 'a', vec![])],
         };
         assert!(matches!(
             catalog.validate(),
