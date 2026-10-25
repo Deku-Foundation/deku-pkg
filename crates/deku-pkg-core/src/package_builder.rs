@@ -507,12 +507,29 @@ mod tests {
         bytes: Vec<u8>,
         path: PathBuf,
         changed: bool,
+        mutate_permissions: bool,
     }
 
     impl Write for MutatingWriter {
         fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
             if !self.changed {
-                fs::write(&self.path, b"modified source bytes").expect("mutate source file");
+                if self.mutate_permissions {
+                    #[cfg(unix)]
+                    {
+                        use std::os::unix::fs::PermissionsExt;
+                        fs::set_permissions(
+                            &self.path,
+                            fs::Permissions::from_mode(0o600),
+                        )
+                        .expect("change source permissions");
+                    }
+                    #[cfg(not(unix))]
+                    fs::write(&self.path, b"modified source bytes")
+                        .expect("mutate source file");
+                } else {
+                    fs::write(&self.path, b"modified source bytes")
+                        .expect("mutate source file");
+                }
                 self.changed = true;
             }
             self.bytes.extend_from_slice(bytes);
@@ -533,6 +550,7 @@ mod tests {
             bytes: Vec::new(),
             path: source,
             changed: false,
+            mutate_permissions: false,
         };
 
         assert!(matches!(
@@ -541,6 +559,31 @@ mod tests {
         ));
         assert!(output.changed);
         assert!(!output.bytes.is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn detects_permission_changes_between_package_scan_and_payload_write() {
+        let root = TestDirectory::new();
+        let source = root.0.join("sample.txt");
+        fs::write(&source, b"stable source bytes").expect("write source fixture");
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&source, fs::Permissions::from_mode(0o644))
+                .expect("set initial mode");
+        }
+        let mut output = MutatingWriter {
+            bytes: Vec::new(),
+            path: source,
+            changed: false,
+            mutate_permissions: true,
+        };
+
+        assert!(matches!(
+            write_archive_from_directory(&root.0, package(), &mut output),
+            Err(BuilderError::SourceChanged(_))
+        ));
+        assert!(output.changed);
     }
 
     #[cfg(unix)]
