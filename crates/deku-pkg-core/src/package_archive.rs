@@ -578,6 +578,16 @@ mod tests {
     }
 
     #[test]
+    fn normalizes_package_version_to_the_native_canonical_form() {
+        let mut info = package();
+        info.version = "1.02".to_string();
+        let bytes = encode_archive(info, Vec::new()).expect("encode canonicalized version");
+        let verified =
+            inspect_archive(&mut Cursor::new(bytes)).expect("verify canonicalized version");
+        assert_eq!(verified.manifest.package.version, "1.2-0");
+    }
+
+    #[test]
     fn rejects_parent_traversal() {
         let mut entries = inputs();
         entries.push(PackageInputEntry {
