@@ -266,7 +266,7 @@ impl PackageArchiveManifest {
             }
             previous = Some(&entry.path);
 
-            if entry.mode & !0o777 != 0 {
+            if entry.mode & !0o777 != 0 || entry.mode & 0o022 != 0 {
                 return Err(ArchiveError::InvalidMode {
                     path: entry.path.clone(),
                     mode: entry.mode,
@@ -280,15 +280,6 @@ impl PackageArchiveManifest {
                 PackageFileKind::Directory => {
                     if entry.size != 0 || entry.sha256.is_some() {
                         return Err(ArchiveError::InvalidEntry(entry.path.clone()));
-                    }
-                    // Writable package directories can let one package alter
-                    // another package's installed files. Shared writable
-                    // runtime directories are provisioned by the system layer.
-                    if entry.mode & 0o022 != 0 {
-                        return Err(ArchiveError::InvalidMode {
-                            path: entry.path.clone(),
-                            mode: entry.mode,
-                        });
                     }
                 }
                 PackageFileKind::File => {
