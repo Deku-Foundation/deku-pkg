@@ -512,9 +512,11 @@ mod tests {
     #[test]
     fn rejects_duplicate_package_identity_and_duplicate_dependencies() {
         let same = package("lib", "1.0-1", "x86_64", "lib.dpak", 'a', vec![]);
+        let mut same_identity_different_artifact = same.clone();
+        same_identity_different_artifact.artifact.file = "lib-alt.dpak".to_string();
         let duplicate_catalog = SolverCatalog {
             schema_version: 1,
-            packages: vec![same.clone(), same],
+            packages: vec![same, same_identity_different_artifact],
         };
         assert!(matches!(
             duplicate_catalog.validate(),
