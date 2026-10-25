@@ -12,7 +12,6 @@ use crate::package_archive::{
     PackageInfo,
 };
 use crate::version::DekuVersion;
-use serde_json;
 use sha2::{Digest, Sha256};
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
@@ -454,7 +453,10 @@ mod tests {
 
         let verified = inspect_archive(&mut Cursor::new(first)).expect("verify built archive");
         assert_eq!(verified.manifest.package.version, "1.2-0");
-        assert_eq!(verified.manifest.package.dependencies, ["libc", "zlib"]);
+        assert_eq!(
+            verified.manifest.package.dependencies,
+            vec!["libc".to_string(), "zlib".to_string()]
+        );
         assert!(verified.manifest.files.iter().any(|entry| entry.path == "usr/share/empty"));
     }
 
