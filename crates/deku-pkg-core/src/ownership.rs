@@ -562,27 +562,16 @@ mod tests {
 
     #[test]
     fn tracks_implicit_parent_directories_and_rejects_mode_mismatch() {
-        let first = manifest(
-            "app-a",
-            "1.0-1",
-            vec![file("usr/bin/a", b"a")],
-        );
+        let first = manifest("app-a", "1.0-1", vec![file("usr/bin/a", b"a")]);
         let database =
             InstalledDatabase::from_manifests(1, [first]).expect("database with implicit dirs");
         let index = database.ownership_index().expect("ownership index");
         let bin_directory = index.get("usr/bin").expect("implicit bin directory");
         assert_eq!(bin_directory.entry.kind, PackageFileKind::Directory);
         assert_eq!(bin_directory.entry.mode, 0o755);
-        assert_eq!(
-            bin_directory.owners,
-            BTreeSet::from(["app-a".to_string()])
-        );
+        assert_eq!(bin_directory.owners, BTreeSet::from(["app-a".to_string()]));
 
-        let second = manifest(
-            "app-b",
-            "1.0-1",
-            vec![file("usr/bin/b", b"b")],
-        );
+        let second = manifest("app-b", "1.0-1", vec![file("usr/bin/b", b"b")]);
         let assessment = database
             .assess_install(&second)
             .expect("implicit parents can be shared at default mode");
