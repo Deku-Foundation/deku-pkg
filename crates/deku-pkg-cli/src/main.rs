@@ -506,6 +506,21 @@ fn run_pack(args: &[OsString]) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let metadata = match fs::metadata(&output_parent) {
+            Ok(metadata) => metadata,
+            Err(error) => {
+                eprintln!("deku-pkg: cannot inspect canonical output directory: {error}");
+                return ExitCode::FAILURE;
+            }
+        };
+        if metadata.permissions().mode() & 0o022 != 0 {
+            eprintln!("deku-pkg: output directory must not be group or world writable");
+            return ExitCode::FAILURE;
+        }
+    }
     let destination = output_parent.join(output_name);
     match fs::symlink_metadata(&destination) {
         Ok(_) => {
