@@ -79,6 +79,19 @@ The CLI now has a separate `trusted-plan` path that composes the pure resolver w
 
 This prevents the trusted path from treating an arbitrary local JSON catalog as an official repository catalog. The earlier `plan` command remains intentionally usable for local development fixtures and prints no claim of publisher authentication. The TUF path now checks a signed target's declared length before download, caps the catalog target at 16 MiB, and verifies for each selected package that an authorized TUF target exists, its signed SHA-256 equals the digest in the TUF-authenticated catalog, and its signed length is within the native archive size limit. The package artifact bytes are still not downloaded by the planning command; no artifact is extracted or installed. The next integration gate must download each planned artifact through TUF, compare the received bytes with the catalog digest, ingest those bytes into the content store, and run the native archive verifier before staged installation can be considered.
 
+
+## Verified artifact fetch and blob-store integration
+
+The CLI now includes a read-only `trusted-fetch-plan` command. It loads repository metadata through the TUF trust adapter, downloads the catalog target only after signed metadata validation, resolves package requirements, then for each planned artifact:
+
+1. Reads its signed target length and SHA-256 before download; rejects sizes above the native archive limit and rejects any digest disagreement between the TUF target metadata and the TUF-authenticated catalog.
+2. Downloads the artifact through `TrustedRepository::download_verified_target`, which checks bytes against the signed TUF target metadata before the file is returned.
+3. Re-checks that the target is a regular file with the signed length, then streams the native archive verifier over it to validate internal file paths, modes, sizes and SHA-256 values.
+4. Checks that the embedded package name, canonical version and architecture exactly match the resolved catalog candidate.
+5. Ingests the raw archive bytes into the content-addressed store using the catalog digest and size limit, then re-hashes the stored object and prints its path.
+
+No package is extracted or installed. This command establishes a complete **metadata-trusted, bytes-verified, archive-inspected, content-addressed fetch path**, not a transaction executor. The next gates are build provenance/catalog release integration, file ownership/collision policy, staged extraction into an isolated root, durable install journal and crash-recovery testing before any live-root write is designed.
+
 ## Trust and licensing boundaries
 
 - Do not enable Void repositories, keys, or binary packages as Deku defaults.
