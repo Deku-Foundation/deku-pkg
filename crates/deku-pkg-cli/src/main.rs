@@ -16,7 +16,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 fn print_usage() {
     println!(
-        "Usage:\n  deku-pkg pack <destdir> <output.dpak> <name> <version> <architecture> <abi> <license> [dependency...]\n  deku-pkg inspect <archive>\n  deku-pkg verify <archive>\n  deku-pkg files <archive>\n  deku-pkg plan <catalog.json> <x86_64|aarch64> <package[>=version,...]>...\n  deku-pkg trusted-plan <root.json> <metadata-url> <targets-url> <datastore> <staging> <catalog-target> <x86_64|aarch64> <package[>=version,...]>...\n  deku-pkg trusted-fetch-plan <root.json> <metadata-url> <targets-url> <datastore> <staging> <store> <catalog-target> <x86_64|aarch64> <package[>=version,...]>...\n  deku-pkg --version"
+        "Usage:\n  deku-pkg pack <destdir> <output.dpak> <name> <version> <architecture> <abi> <license> [dependency...]\n  deku-pkg inspect <archive>\n  deku-pkg verify <archive>\n  deku-pkg files <archive>\n  deku-pkg plan <catalog.json> <x86_64|aarch64> <abi> <package[>=version,...]>...\n  deku-pkg trusted-plan <root.json> <metadata-url> <targets-url> <datastore> <staging> <catalog-target> <x86_64|aarch64> <abi> <package[>=version,...]>...\n  deku-pkg trusted-fetch-plan <root.json> <metadata-url> <targets-url> <datastore> <staging> <store> <catalog-target> <x86_64|aarch64> <abi> <package[>=version,...]>...\n  deku-pkg --version"
     );
 }
 
