@@ -31,11 +31,11 @@ cargo run -p deku-pkg -- verify ./example.dpak
 cargo run -p deku-pkg -- pack ./build/destdir ./out/sample-1.0-1-x86_64.dpak sample 1.0-1 x86_64 deku1-linux-gnu MIT libc zlib
 cargo run -p deku-pkg -- inspect ./out/sample-1.0-1-x86_64.dpak
 cargo run -p deku-pkg -- files ./example.dpak
-cargo run -p deku-pkg -- plan examples/solver-catalog-v1.json x86_64 'desktop-shell>=1.0-1,<2.0-0'
+cargo run -p deku-pkg -- plan examples/solver-catalog-v1.json x86_64 deku1-linux-gnu 'desktop-shell>=1.0-1,<2.0-0'
 
 # Trusted planning from a TUF-authenticated repository (all paths must be provisioned)
-cargo run -p deku-pkg -- trusted-plan ./trusted/root.json https://packages.example.invalid/metadata/ https://packages.example.invalid/targets/ ./var/tuf-state ./var/staging catalogs/native-v1.json x86_64 'desktop-shell>=1.0-1,<2.0-0'
-cargo run -p deku-pkg -- trusted-fetch-plan ./trusted/root.json https://packages.example.invalid/metadata/ https://packages.example.invalid/targets/ ./var/tuf-state ./var/staging ./var/package-store catalogs/native-v1.json x86_64 'desktop-shell>=1.0-1,<2.0-0'
+cargo run -p deku-pkg -- trusted-plan ./trusted/root.json https://packages.example.invalid/metadata/ https://packages.example.invalid/targets/ ./var/tuf-state ./var/staging catalogs/native-v1.json x86_64 deku1-linux-gnu 'desktop-shell>=1.0-1,<2.0-0'
+cargo run -p deku-pkg -- trusted-fetch-plan ./trusted/root.json https://packages.example.invalid/metadata/ https://packages.example.invalid/targets/ ./var/tuf-state ./var/staging ./var/package-store catalogs/native-v1.json x86_64 deku1-linux-gnu 'desktop-shell>=1.0-1,<2.0-0'
 ```
 
 Each archive command fully checks payload digests before displaying metadata or paths. The read-only planner validates a bounded versioned catalog and prints a dependency-first plan pinned to exact artifact filenames and SHA-256 digests. Neither mode checks publisher authentication on its own; the planner does not install, extract, fetch, or change system state.
