@@ -677,7 +677,10 @@ mod signed_repository_fixture_tests {
             .target_info("file1.txt")
             .expect("target should have signed metadata");
         assert_eq!(target_info.length, b"This is an example target file.".len() as u64);
-        assert_eq!(target_info.sha256.len(), 64);
+        assert_eq!(
+            target_info.sha256,
+            "65b8c67f51c993d898250f40aa57a317d854900b3a04895464313e48785440da"
+        );
         assert!(trusted.target_info("../escape").is_err());
 
         let downloaded = trusted
