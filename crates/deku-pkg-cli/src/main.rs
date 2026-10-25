@@ -364,7 +364,6 @@ fn run_trusted_plan(args: &[OsString]) -> ExitCode {
     ExitCode::SUCCESS
 }
 
-
 fn run_trusted_fetch_plan(args: &[OsString]) -> ExitCode {
     if args.len() < 10 {
         print_usage();
@@ -526,9 +525,9 @@ fn run_trusted_fetch_plan(args: &[OsString]) -> ExitCode {
             return ExitCode::FAILURE;
         }
 
-        let downloaded = match runtime.block_on(
-            repository.download_verified_target(&package.artifact.file, &staging),
-        ) {
+        let downloaded = match runtime
+            .block_on(repository.download_verified_target(&package.artifact.file, &staging))
+        {
             Ok(path) => path,
             Err(error) => {
                 eprintln!(
@@ -609,20 +608,17 @@ fn run_trusted_fetch_plan(args: &[OsString]) -> ExitCode {
                 return ExitCode::FAILURE;
             }
         };
-        let stored = match store.put_reader(
-            input,
-            &package.artifact.sha256,
-            MAX_PACKAGE_ARCHIVE_BYTES,
-        ) {
-            Ok(stored) => stored,
-            Err(error) => {
-                eprintln!(
-                    "deku-pkg: content-store validation failed for {}: {error}",
-                    package.artifact.file
-                );
-                return ExitCode::FAILURE;
-            }
-        };
+        let stored =
+            match store.put_reader(input, &package.artifact.sha256, MAX_PACKAGE_ARCHIVE_BYTES) {
+                Ok(stored) => stored,
+                Err(error) => {
+                    eprintln!(
+                        "deku-pkg: content-store validation failed for {}: {error}",
+                        package.artifact.file
+                    );
+                    return ExitCode::FAILURE;
+                }
+            };
         if stored.size != target_info.length {
             eprintln!(
                 "deku-pkg: content-store length disagrees with signed metadata for {}",
@@ -630,7 +626,9 @@ fn run_trusted_fetch_plan(args: &[OsString]) -> ExitCode {
             );
             return ExitCode::FAILURE;
         }
-        if let Err(error) = store.verify_object(&package.artifact.sha256, MAX_PACKAGE_ARCHIVE_BYTES) {
+        if let Err(error) =
+            store.verify_object(&package.artifact.sha256, MAX_PACKAGE_ARCHIVE_BYTES)
+        {
             eprintln!(
                 "deku-pkg: stored artifact failed re-verification for {}: {error}",
                 package.artifact.file
