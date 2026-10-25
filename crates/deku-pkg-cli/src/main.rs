@@ -956,7 +956,9 @@ fn run_trusted_fetch_plan(args: &[OsString]) -> ExitCode {
 fn run_extract(args: &[OsString]) -> ExitCode {
     if args.len() != 3 {
         print_usage();
-        eprintln!("deku-pkg: extract requires one archive and one existing empty staging directory");
+        eprintln!(
+            "deku-pkg: extract requires one archive and one existing empty staging directory"
+        );
         return ExitCode::from(2);
     }
 
