@@ -1,6 +1,7 @@
 use deku_pkg_core::package_archive::{PackageFileKind, inspect_archive};
 use deku_pkg_core::solver::{DependencyRequirement, VersionConstraint};
 use deku_pkg_core::solver_catalog::SolverCatalog;
+use deku_pkg_trust::RepositoryConfig;
 use std::env;
 use std::ffi::OsString;
 use std::fs::File;
@@ -10,7 +11,7 @@ use std::process::ExitCode;
 
 fn print_usage() {
     println!(
-        "Usage:\n  deku-pkg inspect <archive>\n  deku-pkg verify <archive>\n  deku-pkg files <archive>\n  deku-pkg plan <catalog.json> <x86_64|aarch64> <package[>=version,...]>...\n  deku-pkg --version"
+        "Usage:\n  deku-pkg inspect <archive>\n  deku-pkg verify <archive>\n  deku-pkg files <archive>\n  deku-pkg plan <catalog.json> <x86_64|aarch64> <package[>=version,...]>...\n  deku-pkg trusted-plan <root.json> <metadata-url> <targets-url> <datastore> <staging> <catalog-target> <x86_64|aarch64> <package[>=version,...]>...\n  deku-pkg --version"
     );
 }
 
@@ -157,6 +158,168 @@ fn run_plan(args: &[OsString]) -> ExitCode {
     ExitCode::SUCCESS
 }
 
+
+fn read_bounded_catalog(path: &std::path::Path) -> Result<SolverCatalog, String> {
+    let metadata = std::fs::symlink_metadata(path)
+        .map_err(|error| format!("cannot inspect catalog target {}: {error}", path.display()))?;
+    if !metadata.file_type().is_file() || metadata.file_type().is_symlink() {
+        return Err("verified catalog target must be a regular non-symlink file".to_string());
+    }
+    const MAX_CATALOG_BYTES: u64 = 16 * 1024 * 1024;
+    if metadata.len() > MAX_CATALOG_BYTES {
+        return Err(format!(
+            "catalog target is {} bytes; maximum is {MAX_CATALOG_BYTES}",
+            metadata.len()
+        ));
+    }
+
+    let file = File::open(path)
+        .map_err(|error| format!("cannot open catalog target {}: {error}", path.display()))?;
+    let mut bytes = Vec::new();
+    BufReader::new(file)
+        .take(MAX_CATALOG_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|error| format!("cannot read catalog target {}: {error}", path.display()))?;
+    SolverCatalog::from_json(&bytes).map_err(|error| format!("invalid solver catalog: {error}"))
+}
+
+fn run_trusted_plan(args: &[OsString]) -> ExitCode {
+    if args.len() < 9 {
+        print_usage();
+        eprintln!(
+            "deku-pkg: trusted-plan requires root, metadata URL, targets URL, datastore, staging, catalog target, architecture, and at least one package"
+        );
+        return ExitCode::from(2);
+    }
+
+    let text_arg = |index: usize, label: &str| -> Result<&str, String> {
+        args[index]
+            .to_str()
+            .ok_or_else(|| format!("{label} must be valid UTF-8"))
+    };
+    let metadata_url = match text_arg(2, "metadata URL") {
+        Ok(value) => value,
+        Err(error) => {
+            eprintln!("deku-pkg: {error}");
+            return ExitCode::from(2);
+        }
+    };
+    let targets_url = match text_arg(3, "targets URL") {
+        Ok(value) => value,
+        Err(error) => {
+            eprintln!("deku-pkg: {error}");
+            return ExitCode::from(2);
+        }
+    };
+    let catalog_target = match text_arg(6, "catalog target") {
+        Ok(value) => value,
+        Err(error) => {
+            eprintln!("deku-pkg: {error}");
+            return ExitCode::from(2);
+        }
+    };
+    let architecture = match text_arg(7, "target architecture") {
+        Ok(value) => value,
+        Err(error) => {
+            eprintln!("deku-pkg: {error}");
+            return ExitCode::from(2);
+        }
+    };
+
+    let roots = match args[8..]
+        .iter()
+        .map(|argument| {
+            argument
+                .to_str()
+                .ok_or_else(|| "package requirement must be valid UTF-8".to_string())
+                .and_then(parse_root_requirement)
+        })
+        .collect::<Result<Vec<_>, _>>()
+    {
+        Ok(roots) => roots,
+        Err(error) => {
+            eprintln!("deku-pkg: invalid package requirement: {error}");
+            return ExitCode::from(2);
+        }
+    };
+
+    let config = match RepositoryConfig::new(
+        PathBuf::from(&args[1]),
+        metadata_url,
+        targets_url,
+        PathBuf::from(&args[4]),
+    ) {
+        Ok(config) => config,
+        Err(error) => {
+            eprintln!("deku-pkg: invalid trusted repository configuration: {error}");
+            return ExitCode::from(2);
+        }
+    };
+
+    let staging = PathBuf::from(&args[5]);
+    let runtime = match tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+    {
+        Ok(runtime) => runtime,
+        Err(error) => {
+            eprintln!("deku-pkg: cannot initialize async runtime: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+
+    let verified_target = runtime.block_on(async {
+        let repository = config.load().await?;
+        let target_count = repository.target_count();
+        let path = repository
+            .download_verified_target(catalog_target, &staging)
+            .await?;
+        Ok::<_, deku_pkg_trust::TrustError>((target_count, path))
+    });
+    let (target_count, catalog_path) = match verified_target {
+        Ok(result) => result,
+        Err(error) => {
+            eprintln!("deku-pkg: TUF repository verification failed: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+
+    let catalog = match read_bounded_catalog(&catalog_path) {
+        Ok(catalog) => catalog,
+        Err(error) => {
+            eprintln!("deku-pkg: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let plan = match catalog.plan(&roots, architecture) {
+        Ok(plan) => plan,
+        Err(error) => {
+            eprintln!("deku-pkg: dependency resolution failed: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+
+    println!("Repository metadata: TUF verified; expiry and rollback checks enforced by tough");
+    println!("Verified top-level repository targets: {target_count}");
+    println!("Catalog target: {catalog_target}");
+    println!("Target architecture: {architecture}");
+    println!("Packages in plan: {}", plan.packages.len());
+    println!("Resolver states explored: {}", plan.explored_states);
+    for package in &plan.packages {
+        println!(
+            "{} {} {} {} sha256:{}",
+            package.name,
+            package.version,
+            package.architecture,
+            package.artifact.file,
+            package.artifact.sha256
+        );
+    }
+    println!("Package artifacts have not been downloaded or individually checked against the catalog in this command.");
+    println!("No package was extracted or installed.");
+    ExitCode::SUCCESS
+}
+
 fn run(args: Vec<OsString>) -> ExitCode {
     if args.is_empty() {
         print_usage();
@@ -189,6 +352,9 @@ fn run(args: Vec<OsString>) -> ExitCode {
     }
     if command == "plan" {
         return run_plan(&args);
+    }
+    if command == "trusted-plan" {
+        return run_trusted_plan(&args);
     }
     if !matches!(command, "inspect" | "verify" | "files") {
         print_usage();
