@@ -20,16 +20,27 @@ pub enum ContentStoreError {
     InvalidDigest,
     UnsafeDirectory,
     UnsafeObject,
-    ObjectTooLarge { size: u64, limit: u64 },
-    DigestMismatch { expected: String, actual: String },
+    ObjectTooLarge {
+        size: u64,
+        limit: u64,
+    },
+    DigestMismatch {
+        expected: String,
+        actual: String,
+    },
     CorruptExistingObject,
-    Io { operation: &'static str, message: String },
+    Io {
+        operation: &'static str,
+        message: String,
+    },
 }
 
 impl std::fmt::Display for ContentStoreError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::InvalidDigest => write!(f, "object identifier must be a lowercase SHA-256 digest"),
+            Self::InvalidDigest => {
+                write!(f, "object identifier must be a lowercase SHA-256 digest")
+            }
             Self::UnsafeDirectory => write!(
                 f,
                 "content store must be an existing non-symlink directory not writable by group or others"
@@ -39,7 +50,10 @@ impl std::fmt::Display for ContentStoreError {
                 write!(f, "object is {size} bytes; maximum is {limit}")
             }
             Self::DigestMismatch { expected, actual } => {
-                write!(f, "object digest mismatch: expected {expected}, got {actual}")
+                write!(
+                    f,
+                    "object digest mismatch: expected {expected}, got {actual}"
+                )
             }
             Self::CorruptExistingObject => {
                 write!(f, "an existing object with this digest is corrupt")
@@ -81,7 +95,9 @@ impl ContentStore {
             operation: "canonicalize content-store directory",
             message: error.to_string(),
         })?;
-        Ok(Self { directory: canonical })
+        Ok(Self {
+            directory: canonical,
+        })
     }
 
     /// Store a stream only when its complete SHA-256 matches expected_sha256.
@@ -122,12 +138,13 @@ impl ContentStore {
                 if read == 0 {
                     break;
                 }
-                total = total
-                    .checked_add(read as u64)
-                    .ok_or(ContentStoreError::ObjectTooLarge {
-                        size: u64::MAX,
-                        limit: max_bytes,
-                    })?;
+                total =
+                    total
+                        .checked_add(read as u64)
+                        .ok_or(ContentStoreError::ObjectTooLarge {
+                            size: u64::MAX,
+                            limit: max_bytes,
+                        })?;
                 if total > max_bytes {
                     return Err(ContentStoreError::ObjectTooLarge {
                         size: total,
@@ -282,10 +299,7 @@ fn valid_digest(value: &str) -> bool {
             .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
 
-fn hash_reader<R: Read>(
-    mut reader: R,
-    max_bytes: u64,
-) -> Result<(String, u64), ContentStoreError> {
+fn hash_reader<R: Read>(mut reader: R, max_bytes: u64) -> Result<(String, u64), ContentStoreError> {
     let mut hasher = Sha256::new();
     let mut buffer = [0_u8; HASH_BUFFER_BYTES];
     let mut total = 0_u64;
@@ -399,10 +413,8 @@ mod tests {
     impl TestDirectory {
         fn new() -> Self {
             let count = COUNTER.fetch_add(1, Ordering::Relaxed);
-            let path = std::env::temp_dir().join(format!(
-                "deku-content-store-{}-{count}",
-                std::process::id()
-            ));
+            let path = std::env::temp_dir()
+                .join(format!("deku-content-store-{}-{count}", std::process::id()));
             fs::create_dir(&path).expect("create test directory");
             #[cfg(unix)]
             {
