@@ -121,7 +121,7 @@ fn pack_cli_rejects_symlink_payloads_without_publishing_output() {
         assert!(!result.status.success());
         assert!(!archive_path.exists());
         assert!(
-            !fs::read_dir(&output_dir).expect("list output").next().is_some(),
+            fs::read_dir(&output_dir).expect("list output").next().is_none(),
             "temporary output must be cleaned after failure"
         );
     }
