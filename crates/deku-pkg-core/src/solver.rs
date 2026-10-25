@@ -203,22 +203,27 @@ fn validate_requirement(
     Ok(())
 }
 
+struct SearchContext<'a> {
+    catalog: &'a [PackageCandidate],
+    by_name: &'a BTreeMap<String, Vec<usize>>,
+    target_architecture: &'a str,
+    explored_states: usize,
+    failures: BTreeSet<String>,
+    cycles: Vec<Vec<String>>,
+}
+
 fn search(
     state: SearchState,
-    catalog: &[PackageCandidate],
-    by_name: &BTreeMap<String, Vec<usize>>,
-    target_architecture: &str,
-    explored_states: &mut usize,
-    failures: &mut BTreeSet<String>,
-    cycles: &mut Vec<Vec<String>>,
+    context: &mut SearchContext<'_>,
     depth: usize,
 ) -> Result<Option<SearchState>, SolveError> {
-    *explored_states = explored_states
+    context.explored_states = context
+        .explored_states
         .checked_add(1)
         .ok_or(SolveError::SearchLimitExceeded {
             limit: MAX_SEARCH_STATES,
         })?;
-    if *explored_states > MAX_SEARCH_STATES {
+    if context.explored_states > MAX_SEARCH_STATES {
         return Err(SolveError::SearchLimitExceeded {
             limit: MAX_SEARCH_STATES,
         });
@@ -229,17 +234,16 @@ fn search(
         });
     }
 
-    // A new constraint may invalidate a package that was selected earlier.
-    // Returning to the caller lets the earlier choice backtrack to another
-    // version instead of accepting an inconsistent plan.
+    // A new constraint may invalidate a package selected earlier. Returning
+    // None lets the caller backtrack to another version.
     for (name, index) in &state.selected {
         let requirements = state
             .requirements
             .get(name)
             .map(Vec::as_slice)
             .unwrap_or(&[]);
-        if !candidate_satisfies(&catalog[*index], requirements) {
-            failures.insert(name.clone());
+        if !candidate_satisfies(&context.catalog[*index], requirements) {
+            context.failures.insert(name.clone());
             return Ok(None);
         }
     }
@@ -252,21 +256,22 @@ fn search(
             continue;
         }
 
-        let choices = by_name
+        let choices = context
+            .by_name
             .get(name)
             .into_iter()
             .flatten()
             .copied()
             .filter(|index| {
-                let candidate = &catalog[*index];
-                (candidate.architecture == target_architecture
+                let candidate = &context.catalog[*index];
+                (candidate.architecture == context.target_architecture
                     || candidate.architecture == "noarch")
                     && candidate_satisfies(candidate, requirements)
             })
             .collect::<Vec<_>>();
 
         if choices.is_empty() {
-            failures.insert(name.clone());
+            context.failures.insert(name.clone());
             return Ok(None);
         }
 
@@ -279,8 +284,8 @@ fn search(
     }
 
     let Some((name, choices)) = best else {
-        // A dependency cycle is not a valid resolution. Record it as a failed
-        // branch so an alternate package version can be considered.
+        // A cycle invalidates this candidate combination, but should not
+        // prevent backtracking to a lower version that has an acyclic closure.
         let mut trial_order = Vec::with_capacity(state.selected.len());
         let mut temporary = BTreeSet::new();
         let mut permanent = BTreeSet::new();
@@ -289,7 +294,7 @@ fn search(
             match build_install_order(
                 selected_name,
                 &state.selected,
-                catalog,
+                context.catalog,
                 &mut temporary,
                 &mut permanent,
                 &mut stack,
@@ -297,8 +302,8 @@ fn search(
             ) {
                 Ok(()) => {}
                 Err(SolveError::DependencyCycle(cycle)) => {
-                    failures.extend(cycle.iter().cloned());
-                    cycles.push(cycle);
+                    context.failures.extend(cycle.iter().cloned());
+                    context.cycles.push(cycle);
                     return Ok(None);
                 }
                 Err(error) => return Err(error),
@@ -308,7 +313,7 @@ fn search(
     };
 
     for candidate_index in choices {
-        let candidate = &catalog[candidate_index];
+        let candidate = &context.catalog[candidate_index];
         let mut next = state.clone();
         next.selected.insert(name.clone(), candidate_index);
 
@@ -327,16 +332,7 @@ fn search(
             constraints.extend(dependency.constraints.iter().cloned());
         }
 
-        if let Some(solution) = search(
-            next,
-            catalog,
-            by_name,
-            target_architecture,
-            explored_states,
-            failures,
-            cycles,
-            depth + 1,
-        )? {
+        if let Some(solution) = search(next, context, depth + 1)? {
             return Ok(Some(solution));
         }
     }
@@ -519,29 +515,27 @@ pub fn resolve(
         constraints.extend(requirement.constraints.iter().cloned());
     }
 
-    let mut explored_states = 0;
-    let mut failures = BTreeSet::new();
-    let mut cycles = Vec::new();
-    let solution = match search(
-        state,
+    let mut context = SearchContext {
         catalog,
-        &by_name,
+        by_name: &by_name,
         target_architecture,
-        &mut explored_states,
-        &mut failures,
-        &mut cycles,
-        0,
-    )? {
+        explored_states: 0,
+        failures: BTreeSet::new(),
+        cycles: Vec::new(),
+    };
+    let solution = match search(state, &mut context, 0)? {
         Some(solution) => solution,
         None => {
-            if let Some(cycle) = cycles.into_iter().next() {
-                return Err(SolveError::DependencyCycle(cycle));
+            if let Some(cycle) = context.cycles.first() {
+                return Err(SolveError::DependencyCycle(cycle.clone()));
             }
-            if failures.is_empty() {
-                failures.extend(roots.iter().map(|requirement| requirement.name.clone()));
+            if context.failures.is_empty() {
+                context
+                    .failures
+                    .extend(roots.iter().map(|requirement| requirement.name.clone()));
             }
             return Err(SolveError::Unsatisfiable {
-                packages: failures.into_iter().collect(),
+                packages: context.failures.into_iter().collect(),
             });
         }
     };
@@ -564,7 +558,7 @@ pub fn resolve(
 
     Ok(ResolutionPlan {
         packages: output,
-        explored_states,
+        explored_states: context.explored_states,
     })
 }
 
