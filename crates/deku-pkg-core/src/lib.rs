@@ -2,6 +2,7 @@
 //! This crate validates a bounded catalog and computes a deterministic dependency order.
 //! It does not download, install, execute package scripts, or mutate the host.
 
+pub mod content_store;
 pub mod journal_store;
 pub mod package_archive;
 pub mod solver;
