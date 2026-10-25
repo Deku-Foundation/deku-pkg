@@ -74,6 +74,9 @@ pub fn write_archive_from_directory<W: Write>(
     if !root_metadata.file_type().is_dir() || root_metadata.file_type().is_symlink() {
         return Err(BuilderError::UnsafeSource(root.display().to_string()));
     }
+    if directory_is_group_or_world_writable(&root_metadata) {
+        return Err(BuilderError::UnsafeSource(root.display().to_string()));
+    }
 
     let parsed_version = DekuVersion::parse(&package.version)
         .map_err(|_| BuilderError::Archive(ArchiveError::InvalidVersion(package.name.clone())))?;
@@ -192,6 +195,11 @@ fn collect_entries(
                 mode,
             }));
         }
+        if kind == PackageFileKind::Directory
+            && directory_is_group_or_world_writable(&fs_metadata)
+        {
+            return Err(BuilderError::UnsafeSource(physical_path.display().to_string()));
+        }
 
         let (size, sha256) = match kind {
             PackageFileKind::Directory => (0, None),
@@ -227,6 +235,17 @@ fn collect_entries(
     }
 
     Ok(())
+}
+
+#[cfg(unix)]
+fn directory_is_group_or_world_writable(metadata: &fs::Metadata) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    metadata.permissions().mode() & 0o022 != 0
+}
+
+#[cfg(not(unix))]
+fn directory_is_group_or_world_writable(_metadata: &fs::Metadata) -> bool {
+    false
 }
 
 #[cfg(unix)]
