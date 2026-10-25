@@ -4,6 +4,7 @@
 
 pub mod journal_store;
 pub mod package_archive;
+pub mod version;
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
