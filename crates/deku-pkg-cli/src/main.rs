@@ -183,6 +183,16 @@ fn read_bounded_catalog(path: &std::path::Path) -> Result<SolverCatalog, String>
     SolverCatalog::from_json(&bytes).map_err(|error| format!("invalid solver catalog: {error}"))
 }
 
+fn utf8_argument<'a>(
+    args: &'a [OsString],
+    index: usize,
+    label: &str,
+) -> Result<&'a str, String> {
+    args[index]
+        .to_str()
+        .ok_or_else(|| format!("{label} must be valid UTF-8"))
+}
+
 fn run_trusted_plan(args: &[OsString]) -> ExitCode {
     if args.len() < 9 {
         print_usage();
@@ -192,33 +202,28 @@ fn run_trusted_plan(args: &[OsString]) -> ExitCode {
         return ExitCode::from(2);
     }
 
-    let text_arg = |index: usize, label: &str| -> Result<&str, String> {
-        args[index]
-            .to_str()
-            .ok_or_else(|| format!("{label} must be valid UTF-8"))
-    };
-    let metadata_url = match text_arg(2, "metadata URL") {
+    let metadata_url = match utf8_argument(args, 2, "metadata URL") {
         Ok(value) => value,
         Err(error) => {
             eprintln!("deku-pkg: {error}");
             return ExitCode::from(2);
         }
     };
-    let targets_url = match text_arg(3, "targets URL") {
+    let targets_url = match utf8_argument(args, 3, "targets URL") {
         Ok(value) => value,
         Err(error) => {
             eprintln!("deku-pkg: {error}");
             return ExitCode::from(2);
         }
     };
-    let catalog_target = match text_arg(6, "catalog target") {
+    let catalog_target = match utf8_argument(args, 6, "catalog target") {
         Ok(value) => value,
         Err(error) => {
             eprintln!("deku-pkg: {error}");
             return ExitCode::from(2);
         }
     };
-    let architecture = match text_arg(7, "target architecture") {
+    let architecture = match utf8_argument(args, 7, "target architecture") {
         Ok(value) => value,
         Err(error) => {
             eprintln!("deku-pkg: {error}");
@@ -299,7 +304,9 @@ fn run_trusted_plan(args: &[OsString]) -> ExitCode {
         }
     };
 
-    println!("Repository metadata: TUF verified; expiry and rollback checks enforced by tough");
+    println!(
+        "Repository metadata: TUF verified; expiry and rollback checks enforced by tough"
+    );
     println!("Verified top-level repository targets: {target_count}");
     println!("Catalog target: {catalog_target}");
     println!("Target architecture: {architecture}");
@@ -315,7 +322,9 @@ fn run_trusted_plan(args: &[OsString]) -> ExitCode {
             package.artifact.sha256
         );
     }
-    println!("Package artifacts have not been downloaded or individually checked against the catalog in this command.");
+    println!(
+        "Package artifacts have not been downloaded or individually checked against the catalog in this command."
+    );
     println!("No package was extracted or installed.");
     ExitCode::SUCCESS
 }
