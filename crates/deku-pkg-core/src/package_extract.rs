@@ -9,10 +9,10 @@ use crate::package_archive::{
     ArchiveError, PackageArchiveManifest, PackageFileKind, PackageInfo, VerifiedArchive,
     inspect_archive,
 };
+use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
-use sha2::{Digest, Sha256};
 use std::path::{Component, Path, PathBuf};
 
 const HEADER_LEN: usize = 20;
