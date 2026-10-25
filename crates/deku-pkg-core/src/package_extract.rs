@@ -129,6 +129,7 @@ fn ensure_private_destination(metadata: &fs::Metadata) -> Result<(), ExtractionE
     use std::os::unix::fs::{MetadataExt, PermissionsExt};
     // The staging directory must be controlled by the current package-manager
     // process, not merely happen to have non-public permission bits.
+    // SAFETY: geteuid has no pointer arguments or preconditions.
     let effective_uid = unsafe { libc::geteuid() as u32 };
     if metadata.uid() != effective_uid || metadata.permissions().mode() & 0o022 != 0 {
         return Err(ExtractionError::UnsafeDestination);
@@ -502,7 +503,6 @@ fn set_mode(path: &Path, mode: u32) -> std::io::Result<()> {
 mod tests {
     use super::*;
     use crate::package_archive::{PackageInputEntry, encode_archive};
-    use sha2::Digest;
     use std::io::Cursor;
     use std::sync::atomic::{AtomicU64, Ordering};
 
