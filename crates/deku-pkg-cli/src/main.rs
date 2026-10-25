@@ -158,7 +158,6 @@ fn run_plan(args: &[OsString]) -> ExitCode {
     ExitCode::SUCCESS
 }
 
-
 fn read_bounded_catalog(path: &std::path::Path) -> Result<SolverCatalog, String> {
     let metadata = std::fs::symlink_metadata(path)
         .map_err(|error| format!("cannot inspect catalog target {}: {error}", path.display()))?;
@@ -183,11 +182,7 @@ fn read_bounded_catalog(path: &std::path::Path) -> Result<SolverCatalog, String>
     SolverCatalog::from_json(&bytes).map_err(|error| format!("invalid solver catalog: {error}"))
 }
 
-fn utf8_argument<'a>(
-    args: &'a [OsString],
-    index: usize,
-    label: &str,
-) -> Result<&'a str, String> {
+fn utf8_argument<'a>(args: &'a [OsString], index: usize, label: &str) -> Result<&'a str, String> {
     args[index]
         .to_str()
         .ok_or_else(|| format!("{label} must be valid UTF-8"))
@@ -304,9 +299,7 @@ fn run_trusted_plan(args: &[OsString]) -> ExitCode {
         }
     };
 
-    println!(
-        "Repository metadata: TUF verified; expiry and rollback checks enforced by tough"
-    );
+    println!("Repository metadata: TUF verified; expiry and rollback checks enforced by tough");
     println!("Verified top-level repository targets: {target_count}");
     println!("Catalog target: {catalog_target}");
     println!("Target architecture: {architecture}");
