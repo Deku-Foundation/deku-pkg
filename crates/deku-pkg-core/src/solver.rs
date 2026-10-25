@@ -217,12 +217,13 @@ fn search(
     context: &mut SearchContext<'_>,
     depth: usize,
 ) -> Result<Option<SearchState>, SolveError> {
-    context.explored_states = context
-        .explored_states
-        .checked_add(1)
-        .ok_or(SolveError::SearchLimitExceeded {
-            limit: MAX_SEARCH_STATES,
-        })?;
+    context.explored_states =
+        context
+            .explored_states
+            .checked_add(1)
+            .ok_or(SolveError::SearchLimitExceeded {
+                limit: MAX_SEARCH_STATES,
+            })?;
     if context.explored_states > MAX_SEARCH_STATES {
         return Err(SolveError::SearchLimitExceeded {
             limit: MAX_SEARCH_STATES,
