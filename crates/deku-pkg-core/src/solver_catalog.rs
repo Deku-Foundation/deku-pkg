@@ -83,6 +83,11 @@ pub enum SolverCatalogError {
     UnsupportedArchitecture(String),
     InvalidAbi(String),
     InvalidArtifactFile(String),
+    DuplicateArtifactFile {
+        file: String,
+        first_package: String,
+        second_package: String,
+    },
     InvalidDigest(String),
     TooManyDependencies {
         package: String,
@@ -158,6 +163,7 @@ impl SolverCatalog {
         }
 
         let mut identities = BTreeSet::<(String, DekuVersion, String, String)>::new();
+        let mut artifact_files = BTreeMap::<String, String>::new();
         for package in &self.packages {
             if !super::valid_name(&package.name) {
                 return Err(SolverCatalogError::InvalidPackageName(package.name.clone()));
@@ -187,6 +193,16 @@ impl SolverCatalog {
             }
             if !super::valid_digest(&package.artifact.sha256) {
                 return Err(SolverCatalogError::InvalidDigest(package.name.clone()));
+            }
+            if let Some(first_package) = artifact_files.insert(
+                package.artifact.file.clone(),
+                package.name.clone(),
+            ) {
+                return Err(SolverCatalogError::DuplicateArtifactFile {
+                    file: package.artifact.file.clone(),
+                    first_package,
+                    second_package: package.name.clone(),
+                });
             }
             if package.dependencies.len() > MAX_SOLVER_CATALOG_DEPENDENCIES {
                 return Err(SolverCatalogError::TooManyDependencies {
@@ -522,6 +538,21 @@ mod tests {
         assert!(matches!(
             dependency_catalog.validate(),
             Err(SolverCatalogError::DuplicateDependency { .. })
+        ));
+    }
+
+    #[test]
+    fn rejects_artifact_filename_reuse_across_package_identities() {
+        let catalog = SolverCatalog {
+            schema_version: 1,
+            packages: vec![
+                package("app-a", "1.0-1", "x86_64", "shared.dpak", 'a', vec![]),
+                package("app-b", "1.0-1", "x86_64", "shared.dpak", 'b', vec![]),
+            ],
+        };
+        assert!(matches!(
+            catalog.validate(),
+            Err(SolverCatalogError::DuplicateArtifactFile { .. })
         ));
     }
 
