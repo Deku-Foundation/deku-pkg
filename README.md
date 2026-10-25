@@ -29,10 +29,12 @@ The workspace also includes a read-only CLI for verified archive inspection:
 cargo run -p deku-pkg -- inspect ./example.dpak
 cargo run -p deku-pkg -- verify ./example.dpak
 cargo run -p deku-pkg -- files ./example.dpak
-cargo run -p deku-pkg -- plan ./catalog.json x86_64 'desktop-shell>=1.0-1,<2.0-0'
+cargo run -p deku-pkg -- plan examples/solver-catalog-v1.json x86_64 'desktop-shell>=1.0-1,<2.0-0'
 ```
 
 Each archive command fully checks payload digests before displaying metadata or paths. The read-only planner validates a bounded versioned catalog and prints a dependency-first plan pinned to exact artifact filenames and SHA-256 digests. Neither mode checks publisher authentication on its own; the planner does not install, extract, fetch, or change system state.
+The catalog under `examples/` is a test fixture: its SHA-256 values are placeholders, not real artifacts. Replace them with measured hashes and authenticate the catalog through the repository-trust layer before using any catalog as authoritative metadata.
+
 
 ## Native version semantics
 
