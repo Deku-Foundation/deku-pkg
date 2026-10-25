@@ -254,6 +254,10 @@ fn run(args: Vec<OsString>) -> ExitCode {
     ExitCode::SUCCESS
 }
 
+fn main() -> ExitCode {
+    run(env::args_os().skip(1).collect())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -271,8 +275,4 @@ mod tests {
             assert!(parse_root_requirement(invalid).is_err(), "{invalid}");
         }
     }
-}
-
-fn main() -> ExitCode {
-    run(env::args_os().skip(1).collect())
 }
