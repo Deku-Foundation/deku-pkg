@@ -389,7 +389,7 @@ mod tests {
             SolverCatalog::from_json(include_bytes!("../../../examples/solver-catalog-v1.json"))
                 .expect("example catalog is valid");
         let plan = catalog
-            .plan(&[DependencyRequirement::any("desktop-shell")], "x86_64")
+            .plan(&[DependencyRequirement::any("desktop-shell")], "x86_64", "deku1-linux-gnu")
             .expect("example plan resolves");
         assert_eq!(plan.packages.len(), 2);
         assert_eq!(plan.packages[0].name, "libc");
