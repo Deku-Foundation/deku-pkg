@@ -60,6 +60,11 @@ pub enum TrustError {
     },
     InvalidTargetName(String),
     TargetNotFound(String),
+    TargetTooLarge {
+        name: String,
+        size: u64,
+        limit: u64,
+    },
     Io {
         operation: &'static str,
         message: String,
@@ -115,6 +120,12 @@ impl fmt::Display for TrustError {
             }
             Self::TargetNotFound(name) => {
                 write!(f, "trusted repository does not contain target: {name}")
+            }
+            Self::TargetTooLarge { name, size, limit } => {
+                write!(
+                    f,
+                    "target {name} is {size} bytes; maximum permitted size is {limit}"
+                )
             }
             Self::Io { operation, message } => write!(f, "{operation} failed: {message}"),
             Self::Tuf(message) => write!(f, "TUF verification failed: {message}"),
@@ -216,6 +227,14 @@ impl RepositoryConfig {
     }
 }
 
+/// Information authenticated by the repository's signed TUF target metadata.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TrustedTargetInfo {
+    pub name: String,
+    pub length: u64,
+    pub sha256: String,
+}
+
 /// A repository whose root/targets/snapshot/timestamp metadata was accepted by TUF.
 ///
 /// Loading it verifies metadata signatures, versions and expirations. The
@@ -235,6 +254,29 @@ impl TrustedRepository {
     /// relying on it for a large split repository.
     pub fn target_count(&self) -> usize {
         self.inner.all_targets().count()
+    }
+
+    /// Read the signed length and SHA-256 for a target before downloading it.
+    ///
+    /// This allows callers to apply size policy before network/disk I/O and to
+    /// ensure that package metadata points to the same digest as signed target
+    /// metadata. It does not download target bytes.
+    pub fn target_info(&self, target_name: &str) -> Result<TrustedTargetInfo, TrustError> {
+        validate_target_name(target_name)?;
+        let target = TargetName::new(target_name.to_owned())
+            .map_err(|_| TrustError::InvalidTargetName(target_name.to_owned()))?;
+        let description = self
+            .inner
+            .all_targets()
+            .find(|(candidate, _)| candidate.resolved() == target.resolved())
+            .map(|(_, description)| description)
+            .ok_or_else(|| TrustError::TargetNotFound(target_name.to_owned()))?;
+
+        Ok(TrustedTargetInfo {
+            name: target_name.to_owned(),
+            length: description.length,
+            sha256: encode_lower_hex(&description.hashes.sha256),
+        })
     }
 
     /// Download a target into a caller-owned staging directory.
@@ -449,6 +491,16 @@ fn parse_https_base(field: &'static str, value: &str) -> Result<Url, TrustError>
     Ok(url)
 }
 
+fn encode_lower_hex(bytes: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut encoded = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        encoded.push(HEX[(byte >> 4) as usize] as char);
+        encoded.push(HEX[(byte & 0x0f) as usize] as char);
+    }
+    encoded
+}
+
 fn validate_target_name(name: &str) -> Result<(), TrustError> {
     let invalid = name.is_empty()
         || name.len() > MAX_TARGET_NAME_BYTES
@@ -624,6 +676,18 @@ mod signed_repository_fixture_tests {
             trusted.target_count() >= 2,
             "fixture should expose the two top-level signed targets"
         );
+        let target_info = trusted
+            .target_info("file1.txt")
+            .expect("target should have signed metadata");
+        assert_eq!(
+            target_info.length,
+            b"This is an example target file.".len() as u64
+        );
+        assert_eq!(
+            target_info.sha256,
+            "65b8c67f51c993d898250f40aa57a317d854900b3a04895464313e48785440da"
+        );
+        assert!(trusted.target_info("../escape").is_err());
 
         let downloaded = trusted
             .download_verified_target("file1.txt", &staging)

@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "packages": [
+    {
+      "name": "libc",
+      "version": "2.40-1",
+      "architecture": "x86_64",
+      "abi": "deku1-linux-gnu",
+      "artifact": {
+        "file": "libc-2.40-1-x86_64.dpak",
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "dependencies": []
+    },
+    {
+      "name": "desktop-shell",
+      "version": "1.4-1",
+      "architecture": "x86_64",
+      "abi": "deku1-linux-gnu",
+      "artifact": {
+        "file": "desktop-shell-1.4-1-x86_64.dpak",
+        "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      },
+      "dependencies": [
+        {
+          "name": "libc",
+          "constraints": [
+            ">=2.0-0",
+            "<3.0-0"
+          ]
+        }
+      ]
+    }
+  ]
+}

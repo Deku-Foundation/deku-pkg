@@ -2,7 +2,16 @@
 //! This crate validates a bounded catalog and computes a deterministic dependency order.
 //! It does not download, install, execute package scripts, or mutate the host.
 
+pub mod content_store;
+pub mod installed_store;
 pub mod journal_store;
+pub mod ownership;
+pub mod package_archive;
+pub mod package_builder;
+pub mod package_extract;
+pub mod solver;
+pub mod solver_catalog;
+pub mod version;
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -13,7 +22,6 @@ const MAX_CATALOG_PACKAGES: usize = 4_096;
 const MAX_PACKAGE_DEPENDENCIES: usize = 256;
 const MAX_DEPENDENCY_DEPTH: usize = 512;
 const MAX_PACKAGE_NAME_LEN: usize = 128;
-const MAX_VERSION_LEN: usize = 128;
 const MAX_ARTIFACT_FILE_LEN: usize = 180;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -189,12 +197,7 @@ fn valid_name(value: &str) -> bool {
 }
 
 fn valid_version(value: &str) -> bool {
-    !value.is_empty()
-        && value.len() <= MAX_VERSION_LEN
-        && value.trim() == value
-        && value
-            .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || b"._+:-~".contains(&b))
+    crate::version::DekuVersion::parse(value).is_ok()
 }
 
 fn valid_digest(value: &str) -> bool {

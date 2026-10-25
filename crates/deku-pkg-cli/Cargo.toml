@@ -1,0 +1,16 @@
+[package]
+name = "deku-pkg"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "Deku native package archive inspection and verification CLI"
+
+[[bin]]
+name = "deku-pkg"
+path = "src/main.rs"
+
+[dependencies]
+deku-pkg-core = { path = "../deku-pkg-core" }
+deku-pkg-trust = { path = "../deku-pkg-trust" }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "net", "time"] }
+sha2 = "0.10"

@@ -1,3 +1,3 @@
 [workspace]
 resolver = "2"
-members = ["crates/deku-pkg-core", "crates/deku-pkg-trust"]
+members = ["crates/deku-pkg-core", "crates/deku-pkg-trust", "crates/deku-pkg-cli"]
