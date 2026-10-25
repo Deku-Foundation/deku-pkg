@@ -1,7 +1,7 @@
 use deku_pkg_core::content_store::ContentStore;
+use deku_pkg_core::package_archive::PackageInfo;
 use deku_pkg_core::package_archive::{MAX_PACKAGE_ARCHIVE_BYTES, PackageFileKind, inspect_archive};
 use deku_pkg_core::package_builder::write_archive_from_directory;
-use deku_pkg_core::package_archive::PackageInfo;
 use deku_pkg_core::solver::{DependencyRequirement, VersionConstraint};
 use deku_pkg_core::solver_catalog::SolverCatalog;
 use deku_pkg_trust::RepositoryConfig;
@@ -859,8 +859,7 @@ fn run_trusted_fetch_plan(args: &[OsString]) -> ExitCode {
             );
             return ExitCode::FAILURE;
         }
-        if let Err(error) =
-            store.verify_object(&package.artifact.sha256, MAX_PACKAGE_ARCHIVE_BYTES)
+        if let Err(error) = store.verify_object(&package.artifact.sha256, MAX_PACKAGE_ARCHIVE_BYTES)
         {
             eprintln!(
                 "deku-pkg: stored artifact failed re-verification for {}: {error}",
