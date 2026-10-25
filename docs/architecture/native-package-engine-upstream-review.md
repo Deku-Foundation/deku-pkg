@@ -65,6 +65,13 @@ The first versioned solver catalog is now defined separately from the older sing
 The read-only CLI command `deku-pkg plan CATALOG ARCH REQUIREMENT...` loads this catalog, resolves the requested closure, and prints dependency-first package identities with the exact artifact filenames and digests from the validated catalog. Root requirements can use forms such as `desktop-shell>=1.0-1,<2.0-0`. This is not a download or install command. It does not establish that the catalog was published by a trusted repository; the caller must verify signed, fresh repository metadata first. The selected artifact digest must still be checked against downloaded bytes before archive inspection or any future installation.
 
 
+
+## Content-addressed object-store prototype
+
+The core now has a separate object-store adapter that only accepts a stream when its complete SHA-256 matches the expected digest and its byte size stays under a caller-supplied bound. It writes through a temporary file, syncs the bytes, changes the object to read-only, and uses a same-directory hard link to publish without replacing an existing content identifier. If another writer already published that digest, the existing object is re-hashed before deduplication is accepted. The store refuses symlink object paths and directories writable by group or others.
+
+This adapter stores opaque blobs only. It does not establish publisher identity, decide whether an artifact belongs to an authorized repository snapshot, extract archive members, maintain package ownership, or roll a system profile forward/back. Consumers must first verify trusted repository metadata, then ingest using the authorized artifact digest and size bound, and then run the native archive verifier. Crash/recovery and concurrency tests beyond the initial same-process deduplication fixture remain required before a production claim.
+
 ## Trust and licensing boundaries
 
 - Do not enable Void repositories, keys, or binary packages as Deku defaults.
