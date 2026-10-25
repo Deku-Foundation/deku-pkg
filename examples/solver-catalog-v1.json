@@ -5,6 +5,7 @@
       "name": "libc",
       "version": "2.40-1",
       "architecture": "x86_64",
+      "abi": "deku1-linux-gnu",
       "artifact": {
         "file": "libc-2.40-1-x86_64.dpak",
         "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
