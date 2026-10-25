@@ -5,6 +5,7 @@
 pub mod journal_store;
 pub mod package_archive;
 pub mod solver;
+pub mod solver_catalog;
 pub mod version;
 
 use serde::{Deserialize, Serialize};
