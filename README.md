@@ -33,12 +33,15 @@ cargo run -p deku-pkg -- plan examples/solver-catalog-v1.json x86_64 'desktop-sh
 
 # Trusted planning from a TUF-authenticated repository (all paths must be provisioned)
 cargo run -p deku-pkg -- trusted-plan ./trusted/root.json https://packages.example.invalid/metadata/ https://packages.example.invalid/targets/ ./var/tuf-state ./var/staging catalogs/native-v1.json x86_64 'desktop-shell>=1.0-1,<2.0-0'
+cargo run -p deku-pkg -- trusted-fetch-plan ./trusted/root.json https://packages.example.invalid/metadata/ https://packages.example.invalid/targets/ ./var/tuf-state ./var/staging ./var/package-store catalogs/native-v1.json x86_64 'desktop-shell>=1.0-1,<2.0-0'
 ```
 
 Each archive command fully checks payload digests before displaying metadata or paths. The read-only planner validates a bounded versioned catalog and prints a dependency-first plan pinned to exact artifact filenames and SHA-256 digests. Neither mode checks publisher authentication on its own; the planner does not install, extract, fetch, or change system state.
 `trusted-plan` verifies the out-of-band root and current TUF metadata using `deku-pkg-trust` before downloading the catalog target into the staging directory. It requires HTTPS base URLs, a persistent protected datastore, and an existing protected staging directory. The command produces a plan only. Before downloading the catalog it enforces a 16 MiB signed-target size ceiling; for every selected package it checks that a matching signed TUF target exists, that its signed SHA-256 matches the catalog digest, and that its signed size is within the native archive limit. It does not download package artifact bytes into the content store or install software. The `.invalid` hostname above is a documentation placeholder, not a working repository.
 
-The catalog under `examples/` is a test fixture: its SHA-256 values are placeholders, not real artifacts. Replace them with measured hashes and authenticate the catalog through the repository-trust layer before using any catalog as authoritative metadata.
+`trusted-fetch-plan` continues beyond planning: it verifies every selected artifact against signed TUF target metadata and the catalog digest, downloads via the trust crate, checks that the archive manifest identity matches the selected name/version/architecture, then writes the verified bytes into the content-addressed object store and re-verifies the stored object. This is still **not an installer**: it does not unpack archives or write the live system. The package store path must already exist, be a real non-symlink directory, and not be group/world writable.
+
+The catalog under `examples/ is a test fixture: its SHA-256 values are placeholders, not real artifacts. Replace them with measured hashes and authenticate the catalog through the repository-trust layer before using any catalog as authoritative metadata.
 
 
 ## Native version semantics
