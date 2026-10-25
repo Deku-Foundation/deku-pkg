@@ -122,7 +122,10 @@ impl fmt::Display for TrustError {
                 write!(f, "trusted repository does not contain target: {name}")
             }
             Self::TargetTooLarge { name, size, limit } => {
-                write!(f, "target {name} is {size} bytes; maximum permitted size is {limit}")
+                write!(
+                    f,
+                    "target {name} is {size} bytes; maximum permitted size is {limit}"
+                )
             }
             Self::Io { operation, message } => write!(f, "{operation} failed: {message}"),
             Self::Tuf(message) => write!(f, "TUF verification failed: {message}"),
@@ -676,7 +679,10 @@ mod signed_repository_fixture_tests {
         let target_info = trusted
             .target_info("file1.txt")
             .expect("target should have signed metadata");
-        assert_eq!(target_info.length, b"This is an example target file.".len() as u64);
+        assert_eq!(
+            target_info.length,
+            b"This is an example target file.".len() as u64
+        );
         assert_eq!(
             target_info.sha256,
             "65b8c67f51c993d898250f40aa57a317d854900b3a04895464313e48785440da"
