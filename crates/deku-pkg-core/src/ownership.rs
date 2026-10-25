@@ -545,7 +545,7 @@ mod tests {
         let assessment = database
             .assess_install(&second)
             .expect("shared directory allowed");
-        assert_eq!(assessment.shared_directories, vec!["usr/bin"]);
+        assert_eq!(assessment.shared_directories, vec!["usr", "usr/bin"]);
         assert_eq!(assessment.paths_to_claim, vec!["usr/bin/b"]);
         assert!(!assessment.replacing_existing_version);
 
@@ -557,6 +557,50 @@ mod tests {
         assert!(matches!(
             database.assess_install(&conflicting_mode),
             Err(OwnershipError::DirectoryModeConflict { .. })
+        ));
+    }
+
+    #[test]
+    fn tracks_implicit_parent_directories_and_rejects_mode_mismatch() {
+        let first = manifest(
+            "app-a",
+            "1.0-1",
+            vec![file("usr/bin/a", b"a")],
+        );
+        let database =
+            InstalledDatabase::from_manifests(1, [first]).expect("database with implicit dirs");
+        let index = database.ownership_index().expect("ownership index");
+        let bin_directory = index.get("usr/bin").expect("implicit bin directory");
+        assert_eq!(bin_directory.entry.kind, PackageFileKind::Directory);
+        assert_eq!(bin_directory.entry.mode, 0o755);
+        assert_eq!(
+            bin_directory.owners,
+            BTreeSet::from(["app-a".to_string()])
+        );
+
+        let second = manifest(
+            "app-b",
+            "1.0-1",
+            vec![file("usr/bin/b", b"b")],
+        );
+        let assessment = database
+            .assess_install(&second)
+            .expect("implicit parents can be shared at default mode");
+        assert_eq!(assessment.shared_directories, vec!["usr", "usr/bin"]);
+        assert_eq!(assessment.paths_to_claim, vec!["usr/bin/b"]);
+
+        let explicitly_restricted = manifest(
+            "app-c",
+            "1.0-1",
+            vec![directory("usr/bin", 0o750), file("usr/bin/c", b"c")],
+        );
+        assert!(matches!(
+            database.assess_install(&explicitly_restricted),
+            Err(OwnershipError::DirectoryModeConflict {
+                path,
+                first_mode: 0o755,
+                second_mode: 0o750
+            }) if path == "usr/bin"
         ));
     }
 
@@ -584,8 +628,14 @@ mod tests {
             .expect("upgrade can replace own path");
         assert!(assessment.replacing_existing_version);
         assert_eq!(assessment.database_generation, 8);
-        assert_eq!(assessment.paths_to_claim, vec!["usr/bin/app"]);
-        assert_eq!(assessment.paths_to_release, vec!["usr/share/old"]);
+        assert_eq!(
+            assessment.paths_to_claim,
+            vec!["usr", "usr/bin", "usr/bin/app"]
+        );
+        assert_eq!(
+            assessment.paths_to_release,
+            vec!["usr/share", "usr/share/old"]
+        );
 
         let other = manifest("other", "1.0-1", vec![file("usr/bin/other", b"other")]);
         let database_with_other =
