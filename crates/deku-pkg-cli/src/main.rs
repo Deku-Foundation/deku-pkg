@@ -5,6 +5,7 @@ use deku_pkg_core::package_builder::write_archive_from_directory;
 use deku_pkg_core::solver::{DependencyRequirement, VersionConstraint};
 use deku_pkg_core::solver_catalog::SolverCatalog;
 use deku_pkg_trust::RepositoryConfig;
+use sha2::{Digest, Sha256};
 use std::env;
 use std::ffi::OsString;
 use std::fs::{self, File, OpenOptions};
@@ -12,7 +13,6 @@ use std::io::{BufReader, Read, Write};
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::time::{SystemTime, UNIX_EPOCH};
-use sha2::{Digest, Sha256};
 
 fn print_usage() {
     println!(
