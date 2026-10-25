@@ -279,9 +279,10 @@ impl InstalledDatabase {
         combined.sort_by(|left, right| left.package.name.cmp(&right.package.name));
         let _combined_index = build_index(&combined)?;
 
+        let incoming_entries = expanded_entries(&incoming.files);
         let mut paths_to_claim = Vec::new();
         let mut shared_directories = Vec::new();
-        for entry in &incoming.files {
+        for entry in &incoming_entries {
             match existing_index.paths.get(&entry.path) {
                 None => paths_to_claim.push(entry.path.clone()),
                 Some(existing)
@@ -318,16 +319,22 @@ impl InstalledDatabase {
             }
         }
 
-        let incoming_paths = incoming
-            .files
+        let incoming_paths = incoming_entries
             .iter()
             .map(|entry| entry.path.as_str())
             .collect::<BTreeSet<_>>();
-        let paths_to_release = previous
-            .into_iter()
-            .flat_map(|record| record.files.iter())
-            .filter(|entry| !incoming_paths.contains(entry.path.as_str()))
-            .map(|entry| entry.path.clone())
+        let previous_paths = previous
+            .map(|record| {
+                expanded_entries(&record.files)
+                    .into_iter()
+                    .map(|entry| entry.path)
+                    .collect::<BTreeSet<_>>()
+            })
+            .unwrap_or_default();
+        let paths_to_release = previous_paths
+            .iter()
+            .filter(|path| !incoming_paths.contains(path.as_str()))
+            .cloned()
             .collect();
 
         Ok(InstallOwnershipAssessment {
@@ -357,11 +364,37 @@ impl FileOwnershipIndex {
     }
 }
 
+/// Include implicit parent directories created by the staging extractor.
+/// The format permits omitted directory entries; such parents use the documented
+/// default mode 0755 and must still participate in cross-package ownership checks.
+fn expanded_entries(files: &[PackageFile]) -> Vec<PackageFile> {
+    let mut by_path = BTreeMap::<String, PackageFile>::new();
+    for entry in files {
+        by_path.insert(entry.path.clone(), entry.clone());
+    }
+    for entry in files {
+        let mut parent = entry.path.as_str();
+        while let Some(separator) = parent.rfind('/') {
+            parent = &parent[..separator];
+            by_path
+                .entry(parent.to_string())
+                .or_insert_with(|| PackageFile {
+                    path: parent.to_string(),
+                    kind: PackageFileKind::Directory,
+                    mode: 0o755,
+                    size: 0,
+                    sha256: None,
+                });
+        }
+    }
+    by_path.into_values().collect()
+}
+
 fn build_index(packages: &[InstalledPackageRecord]) -> Result<FileOwnershipIndex, OwnershipError> {
     let mut index = FileOwnershipIndex::default();
 
     for record in packages {
-        for entry in &record.files {
+        for entry in expanded_entries(&record.files).iter() {
             match index.paths.get_mut(&entry.path) {
                 None => {
                     index.paths.insert(
