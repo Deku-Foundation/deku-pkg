@@ -16,6 +16,7 @@
       "name": "desktop-shell",
       "version": "1.4-1",
       "architecture": "x86_64",
+      "abi": "deku1-linux-gnu",
       "artifact": {
         "file": "desktop-shell-1.4-1-x86_64.dpak",
         "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
