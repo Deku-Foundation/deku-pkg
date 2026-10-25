@@ -81,19 +81,29 @@ fn parse_root_requirement(value: &str) -> Result<DependencyRequirement, String> 
 }
 
 fn run_plan(args: &[OsString]) -> ExitCode {
-    if args.len() < 4 {
+    if args.len() < 5 {
         print_usage();
         eprintln!(
-            "deku-pkg: plan requires a catalog, target architecture, and at least one package"
+            "deku-pkg: plan requires a catalog, target architecture, ABI, and at least one package"
         );
         return ExitCode::from(2);
     }
 
-    let Some(architecture) = args[2].to_str() else {
-        eprintln!("deku-pkg: target architecture must be valid UTF-8");
-        return ExitCode::from(2);
+    let architecture = match utf8_argument(args, 2, "target architecture") {
+        Ok(value) => value,
+        Err(error) => {
+            eprintln!("deku-pkg: {error}");
+            return ExitCode::from(2);
+        }
     };
-    let roots = match args[3..]
+    let target_abi = match utf8_argument(args, 3, "target ABI") {
+        Ok(value) => value,
+        Err(error) => {
+            eprintln!("deku-pkg: {error}");
+            return ExitCode::from(2);
+        }
+    };
+    let roots = match args[4..]
         .iter()
         .map(|argument| {
             argument
@@ -111,30 +121,10 @@ fn run_plan(args: &[OsString]) -> ExitCode {
     };
 
     let path = PathBuf::from(&args[1]);
-    let file = match File::open(&path) {
-        Ok(file) => file,
-        Err(error) => {
-            eprintln!("deku-pkg: cannot open {}: {error}", path.display());
-            return ExitCode::FAILURE;
-        }
-    };
-
-    // Read at most the catalog limit plus one byte so a hostile file cannot
-    // cause an unbounded allocation before the JSON parser enforces limits.
-    let max_read = 16 * 1024 * 1024 + 1;
-    let mut bytes = Vec::new();
-    if let Err(error) = BufReader::new(file).take(max_read).read_to_end(&mut bytes) {
-        eprintln!("deku-pkg: cannot read {}: {error}", path.display());
-        return ExitCode::FAILURE;
-    }
-
-    let catalog = match SolverCatalog::from_json(&bytes) {
+    let catalog = match read_bounded_catalog(&path) {
         Ok(catalog) => catalog,
         Err(error) => {
-            eprintln!(
-                "deku-pkg: invalid solver catalog {}: {error}",
-                path.display()
-            );
+            eprintln!("deku-pkg: {error}");
             return ExitCode::FAILURE;
         }
     };
@@ -145,35 +135,6 @@ fn run_plan(args: &[OsString]) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-
-    // The signed catalog and signed targets metadata must agree on every
-    // planned artifact before the plan is advertised as repository-consistent.
-    for package in &plan.packages {
-        let target_info = match repository.target_info(&package.artifact.file) {
-            Ok(info) => info,
-            Err(error) => {
-                eprintln!(
-                    "deku-pkg: planned artifact {} is not authorized by TUF: {error}",
-                    package.artifact.file
-                );
-                return ExitCode::FAILURE;
-            }
-        };
-        if target_info.length > MAX_PACKAGE_ARCHIVE_BYTES {
-            eprintln!(
-                "deku-pkg: artifact {} exceeds the native archive size limit ({} > {})",
-                target_info.name, target_info.length, MAX_PACKAGE_ARCHIVE_BYTES
-            );
-            return ExitCode::FAILURE;
-        }
-        if target_info.sha256 != package.artifact.sha256 {
-            eprintln!(
-                "deku-pkg: SHA-256 mismatch between catalog and signed TUF target metadata for {}",
-                package.artifact.file
-            );
-            return ExitCode::FAILURE;
-        }
-    }
 
     println!("Target architecture: {architecture}");
     println!("Target ABI: {target_abi}");
@@ -351,6 +312,35 @@ fn run_trusted_plan(args: &[OsString]) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
+
+    // Check that every selected artifact is part of the same authenticated
+    // TUF view as the catalog, before presenting this as a trusted plan.
+    for package in &plan.packages {
+        let target_info = match repository.target_info(&package.artifact.file) {
+            Ok(info) => info,
+            Err(error) => {
+                eprintln!(
+                    "deku-pkg: planned artifact {} is not authorized by TUF: {error}",
+                    package.artifact.file
+                );
+                return ExitCode::FAILURE;
+            }
+        };
+        if target_info.length > MAX_PACKAGE_ARCHIVE_BYTES {
+            eprintln!(
+                "deku-pkg: artifact {} exceeds the native archive size limit ({} > {})",
+                target_info.name, target_info.length, MAX_PACKAGE_ARCHIVE_BYTES
+            );
+            return ExitCode::FAILURE;
+        }
+        if target_info.sha256 != package.artifact.sha256 {
+            eprintln!(
+                "deku-pkg: SHA-256 mismatch between catalog and signed TUF target metadata for {}",
+                package.artifact.file
+            );
+            return ExitCode::FAILURE;
+        }
+    }
 
     println!("Repository metadata: TUF verified; expiry and rollback checks enforced by tough");
     println!("Verified top-level repository targets: {target_count}");
