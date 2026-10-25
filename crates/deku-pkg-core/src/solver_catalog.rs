@@ -5,12 +5,12 @@
 //! digest, architecture, and Deku ABI. A parsed catalog is still only metadata;
 //! only the TUF trust layer can authenticate its publisher and freshness.
 
+use crate::Artifact;
 use crate::solver::{
     DependencyRequirement, PackageCandidate, ResolutionPlan, ResolvedPackage, SolveError,
     VersionConstraint, resolve,
 };
 use crate::version::DekuVersion;
-use crate::Artifact;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -67,10 +67,16 @@ pub struct PinnedResolutionPlan {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SolverCatalogError {
-    MetadataTooLarge { size: usize, limit: usize },
+    MetadataTooLarge {
+        size: usize,
+        limit: usize,
+    },
     InvalidJson(String),
     UnsupportedSchema,
-    TooManyPackages { count: usize, limit: usize },
+    TooManyPackages {
+        count: usize,
+        limit: usize,
+    },
     InvalidPackageName(String),
     InvalidVersion(String),
     NonCanonicalVersion(String),
@@ -78,8 +84,15 @@ pub enum SolverCatalogError {
     InvalidAbi(String),
     InvalidArtifactFile(String),
     InvalidDigest(String),
-    TooManyDependencies { package: String, count: usize, limit: usize },
-    DuplicateDependency { package: String, dependency: String },
+    TooManyDependencies {
+        package: String,
+        count: usize,
+        limit: usize,
+    },
+    DuplicateDependency {
+        package: String,
+        dependency: String,
+    },
     SelfDependency(String),
     TooManyConstraints {
         package: String,
@@ -282,7 +295,11 @@ impl SolverCatalog {
 
         let mut by_identity =
             BTreeMap::<(String, DekuVersion, String, String), &SolverCatalogPackage>::new();
-        for package in self.packages.iter().filter(|package| package.abi == target_abi) {
+        for package in self
+            .packages
+            .iter()
+            .filter(|package| package.abi == target_abi)
+        {
             let version = DekuVersion::parse(&package.version)
                 .map_err(|_| SolverCatalogError::InvalidVersion(package.name.clone()))?;
             by_identity.insert(
