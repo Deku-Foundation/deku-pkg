@@ -136,6 +136,7 @@ pub enum SolveError {
     InvalidConstraint(String),
     DuplicateCandidate { name: String, version: String, architecture: String },
     SearchLimitExceeded { limit: usize },
+    SearchDepthExceeded { limit: usize },
     Unsatisfiable { packages: Vec<String> },
     DependencyCycle(Vec<String>),
 }
@@ -199,9 +200,14 @@ fn search(
         .ok_or(SolveError::SearchLimitExceeded {
             limit: MAX_SEARCH_STATES,
         })?;
-    if *explored_states > MAX_SEARCH_STATES || depth > MAX_SEARCH_DEPTH {
+    if *explored_states > MAX_SEARCH_STATES {
         return Err(SolveError::SearchLimitExceeded {
             limit: MAX_SEARCH_STATES,
+        });
+    }
+    if depth > MAX_SEARCH_DEPTH {
+        return Err(SolveError::SearchDepthExceeded {
+            limit: MAX_SEARCH_DEPTH,
         });
     }
 
