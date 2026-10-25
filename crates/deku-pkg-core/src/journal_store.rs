@@ -18,6 +18,8 @@ const MAX_TEMP_NAME_ATTEMPTS: u32 = 32;
 pub enum JournalStoreError {
     InvalidTransactionId,
     UnsafeDirectory,
+    StaleJournalUpdate,
+    UnsupportedPlatform,
     UnsafeJournalFile,
     JournalTooLarge {
         size: usize,
@@ -40,6 +42,13 @@ impl std::fmt::Display for JournalStoreError {
             ),
             Self::UnsafeJournalFile => {
                 write!(f, "journal path must be a regular, non-symlink file")
+            }
+            Self::StaleJournalUpdate => write!(
+                f,
+                "refusing to replace transaction history with a stale or divergent journal"
+            ),
+            Self::UnsupportedPlatform => {
+                write!(f, "durable transaction journal locking is supported on Unix platforms only")
             }
             Self::JournalTooLarge { size, limit } => {
                 write!(f, "journal is {size} bytes; maximum is {limit}")
@@ -96,10 +105,14 @@ impl TransactionJournalStore {
             });
         }
 
+        // Serialize read/validate/replace across concurrent processes. The
+        // journal's history must also extend the previous persisted history.
+        let _lock = acquire_store_lock(&self.directory)?;
         let destination = self.path_for(&journal.transaction_id)?;
         match fs::symlink_metadata(&destination) {
             Ok(metadata) => {
                 ensure_private_journal_file(&metadata)?;
+                ensure_history_extension(&destination, journal)?;
             }
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
             Err(error) => {
@@ -247,6 +260,127 @@ fn valid_id(value: &str) -> bool {
         && value
             .bytes()
             .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
+}
+
+#[cfg(unix)]
+struct StoreLock(File);
+
+#[cfg(unix)]
+impl Drop for StoreLock {
+    fn drop(&mut self) {
+        use std::os::fd::AsRawFd;
+        // SAFETY: self.file owns a live file descriptor for the lock file.
+        unsafe {
+            let _ = libc::flock(self.0.as_raw_fd(), libc::LOCK_UN);
+        }
+    }
+}
+
+#[cfg(unix)]
+fn acquire_store_lock(directory: &Path) -> Result<StoreLock, JournalStoreError> {
+    use std::os::unix::fs::OpenOptionsExt;
+    use std::os::fd::AsRawFd;
+
+    let path = directory.join(".journal-store.lock");
+    let mut options = OpenOptions::new();
+    options
+        .read(true)
+        .write(true)
+        .create(true)
+        .mode(0o600)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC);
+    let file = options.open(&path).map_err(|error| {
+        if error.raw_os_error() == Some(libc::ELOOP) {
+            JournalStoreError::UnsafeJournalFile
+        } else {
+            JournalStoreError::Io {
+                operation: "open transaction journal lock",
+                message: error.to_string(),
+            }
+        }
+    })?;
+    let metadata = file.metadata().map_err(|error| JournalStoreError::Io {
+        operation: "inspect transaction journal lock",
+        message: error.to_string(),
+    })?;
+    ensure_private_journal_file(&metadata)?;
+
+    loop {
+        // SAFETY: flock operates on the valid descriptor owned by file.
+        let result = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX) };
+        if result == 0 {
+            return Ok(StoreLock(file));
+        }
+        let error = std::io::Error::last_os_error();
+        if error.kind() != std::io::ErrorKind::Interrupted {
+            return Err(JournalStoreError::Io {
+                operation: "lock transaction journal store",
+                message: error.to_string(),
+            });
+        }
+    }
+}
+
+#[cfg(not(unix))]
+struct StoreLock;
+
+#[cfg(not(unix))]
+fn acquire_store_lock(_directory: &Path) -> Result<StoreLock, JournalStoreError> {
+    Err(JournalStoreError::UnsupportedPlatform)
+}
+
+fn ensure_history_extension(
+    destination: &Path,
+    next: &TransactionJournal,
+) -> Result<(), JournalStoreError> {
+    let metadata = fs::symlink_metadata(destination).map_err(|error| JournalStoreError::Io {
+        operation: "inspect existing transaction journal",
+        message: error.to_string(),
+    })?;
+    ensure_private_journal_file(&metadata)?;
+    if metadata.len() > MAX_JOURNAL_BYTES as u64 {
+        return Err(JournalStoreError::JournalTooLarge {
+            size: usize::try_from(metadata.len()).unwrap_or(usize::MAX),
+            limit: MAX_JOURNAL_BYTES,
+        });
+    }
+    let file = open_journal_file(destination).map_err(|error| {
+        if is_symlink_open_error(&error) {
+            JournalStoreError::UnsafeJournalFile
+        } else {
+            JournalStoreError::Io {
+                operation: "open existing transaction journal",
+                message: error.to_string(),
+            }
+        }
+    })?;
+    let opened_metadata = file.metadata().map_err(|error| JournalStoreError::Io {
+        operation: "inspect opened transaction journal",
+        message: error.to_string(),
+    })?;
+    ensure_private_journal_file(&opened_metadata)?;
+    let mut bytes = Vec::new();
+    file.take((MAX_JOURNAL_BYTES + 1) as u64)
+        .read_to_end(&mut bytes)
+        .map_err(|error| JournalStoreError::Io {
+            operation: "read existing transaction journal",
+            message: error.to_string(),
+        })?;
+    if bytes.len() > MAX_JOURNAL_BYTES {
+        return Err(JournalStoreError::JournalTooLarge {
+            size: bytes.len(),
+            limit: MAX_JOURNAL_BYTES,
+        });
+    }
+    let previous = TransactionJournal::from_json(&bytes)
+        .map_err(|error| JournalStoreError::InvalidJournal(error.to_string()))?;
+    if previous.transaction_id != next.transaction_id
+        || previous.history.len() > next.history.len()
+        || previous.history.iter().zip(&next.history).any(|(old, new)| old != new)
+    {
+        return Err(JournalStoreError::StaleJournalUpdate);
+    }
+    Ok(())
 }
 
 #[cfg(unix)]
@@ -419,6 +553,76 @@ mod tests {
             Err(JournalStoreError::UnsafeDirectory)
         ));
         fs::set_permissions(&temp.0, fs::Permissions::from_mode(0o700)).unwrap();
+    }
+
+    #[test]
+    fn rejects_a_stale_journal_after_a_newer_state_was_saved() {
+        let temp = TestDirectory::new();
+        let store = TransactionJournalStore::open(&temp.0).unwrap();
+        let initial = TransactionJournal::new("txn-stale-001").unwrap();
+        store.save(&initial).unwrap();
+
+        let mut newer = initial.clone();
+        newer.transition(TransactionState::Acquiring, None).unwrap();
+        store.save(&newer).unwrap();
+
+        assert!(matches!(
+            store.save(&initial),
+            Err(JournalStoreError::StaleJournalUpdate)
+        ));
+        assert_eq!(
+            store.load("txn-stale-001").unwrap().state,
+            TransactionState::Acquiring
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn serializes_competing_journal_updates_across_threads() {
+        use std::sync::{Arc, Barrier};
+        use std::thread;
+
+        let temp = TestDirectory::new();
+        let store = TransactionJournalStore::open(&temp.0).unwrap();
+        let initial = TransactionJournal::new("txn-race-001").unwrap();
+        store.save(&initial).unwrap();
+
+        let mut acquiring = initial.clone();
+        acquiring
+            .transition(TransactionState::Acquiring, None)
+            .unwrap();
+        let mut failed = initial.clone();
+        failed.transition(TransactionState::Failed, None).unwrap();
+
+        let barrier = Arc::new(Barrier::new(3));
+        let left_store = store.clone();
+        let left_barrier = barrier.clone();
+        let left = thread::spawn(move || {
+            left_barrier.wait();
+            left_store.save(&acquiring)
+        });
+        let right_store = store.clone();
+        let right_barrier = barrier.clone();
+        let right = thread::spawn(move || {
+            right_barrier.wait();
+            right_store.save(&failed)
+        });
+        barrier.wait();
+
+        let results = [left.join().unwrap(), right.join().unwrap()];
+        assert_eq!(results.iter().filter(|result| result.is_ok()).count(), 1);
+        assert_eq!(
+            results
+                .iter()
+                .filter(|result| matches!(result, Err(JournalStoreError::StaleJournalUpdate)))
+                .count(),
+            1
+        );
+        let final_state = store.load("txn-race-001").unwrap().state;
+        assert!(matches!(
+            final_state,
+            TransactionState::Acquiring | TransactionState::Failed
+        ));
     }
 
     #[cfg(unix)]
