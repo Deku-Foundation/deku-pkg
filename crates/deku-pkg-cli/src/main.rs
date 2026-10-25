@@ -1,7 +1,7 @@
 use deku_pkg_core::content_store::ContentStore;
+use deku_pkg_core::package_archive::{MAX_PACKAGE_ARCHIVE_BYTES, PackageFileKind, inspect_archive};
 use deku_pkg_core::package_builder::write_archive_from_directory;
 use deku_pkg_core::package_archive::PackageInfo;
-use deku_pkg_core::package_archive::{MAX_PACKAGE_ARCHIVE_BYTES, PackageFileKind, inspect_archive};
 use deku_pkg_core::solver::{DependencyRequirement, VersionConstraint};
 use deku_pkg_core::solver_catalog::SolverCatalog;
 use deku_pkg_trust::RepositoryConfig;
@@ -391,7 +391,10 @@ fn create_pack_temp(parent: &std::path::Path) -> Result<(PathBuf, File), String>
             Ok(file) => return Ok((path, file)),
             Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
             Err(error) => {
-                return Err(format!("cannot create temporary package {}: {error}", path.display()));
+                return Err(format!(
+                    "cannot create temporary package {}: {error}",
+                    path.display()
+                ));
             }
         }
     }
@@ -580,9 +583,7 @@ fn run_pack(args: &[OsString]) -> ExitCode {
         return ExitCode::FAILURE;
     }
     if let Err(error) = fs::remove_file(&temporary) {
-        eprintln!(
-            "deku-pkg: package was published but temporary-file cleanup failed: {error}"
-        );
+        eprintln!("deku-pkg: package was published but temporary-file cleanup failed: {error}");
         return ExitCode::FAILURE;
     }
     if let Err(error) = File::open(&output_parent).and_then(|directory| directory.sync_all()) {
