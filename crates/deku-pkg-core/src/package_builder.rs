@@ -517,15 +517,11 @@ mod tests {
                     #[cfg(unix)]
                     {
                         use std::os::unix::fs::PermissionsExt;
-                        fs::set_permissions(
-                            &self.path,
-                            fs::Permissions::from_mode(0o600),
-                        )
-                        .expect("change source permissions");
+                        fs::set_permissions(&self.path, fs::Permissions::from_mode(0o600))
+                            .expect("change source permissions");
                     }
                     #[cfg(not(unix))]
-                    fs::write(&self.path, b"modified source bytes")
-                        .expect("mutate source file");
+                    fs::write(&self.path, b"modified source bytes").expect("mutate source file");
                 } else {
                     fs::write(&self.path, b"modified source bytes")
                         .expect("mutate source file");
