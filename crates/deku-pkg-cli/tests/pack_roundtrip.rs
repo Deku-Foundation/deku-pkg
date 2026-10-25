@@ -132,3 +132,15 @@ fn pack_cli_rejects_symlink_payloads_without_publishing_output() {
         );
     }
 }
+
+#[test]
+fn planning_help_documents_explicit_target_abi() {
+    let output = Command::new(env!("CARGO_BIN_EXE_deku-pkg"))
+        .arg("--help")
+        .output()
+        .expect("run help command");
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("deku-pkg plan <catalog.json> <x86_64|aarch64> <abi>"));
+    assert!(stdout.contains("<catalog-target> <x86_64|aarch64> <abi>"));
+}
