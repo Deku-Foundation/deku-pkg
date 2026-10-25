@@ -311,12 +311,7 @@ impl InstalledDatabase {
                 Some(existing) => {
                     return Err(OwnershipError::FileAlreadyOwned {
                         path: entry.path.clone(),
-                        first_package: existing
-                            .owners
-                            .iter()
-                            .next()
-                            .cloned()
-                            .unwrap_or_default(),
+                        first_package: existing.owners.iter().next().cloned().unwrap_or_default(),
                         second_package: incoming.package.name.clone(),
                     });
                 }
@@ -380,12 +375,7 @@ fn build_index(packages: &[InstalledPackageRecord]) -> Result<FileOwnershipIndex
                 Some(existing) if existing.entry.kind != entry.kind => {
                     return Err(OwnershipError::PathTypeConflict {
                         path: entry.path.clone(),
-                        first_package: existing
-                            .owners
-                            .iter()
-                            .next()
-                            .cloned()
-                            .unwrap_or_default(),
+                        first_package: existing.owners.iter().next().cloned().unwrap_or_default(),
                         second_package: record.package.name.clone(),
                     });
                 }
@@ -408,12 +398,7 @@ fn build_index(packages: &[InstalledPackageRecord]) -> Result<FileOwnershipIndex
                 Some(existing) => {
                     return Err(OwnershipError::FileAlreadyOwned {
                         path: entry.path.clone(),
-                        first_package: existing
-                            .owners
-                            .iter()
-                            .next()
-                            .cloned()
-                            .unwrap_or_default(),
+                        first_package: existing.owners.iter().next().cloned().unwrap_or_default(),
                         second_package: record.package.name.clone(),
                     });
                 }
