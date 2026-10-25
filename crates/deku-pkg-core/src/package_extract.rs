@@ -587,6 +587,30 @@ mod tests {
         .expect("encode fixture archive")
     }
 
+    struct SwitchingReader {
+        current: Cursor<Vec<u8>>,
+        altered_archive: Vec<u8>,
+        start_seeks: usize,
+    }
+
+    impl std::io::Read for SwitchingReader {
+        fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+            self.current.read(buffer)
+        }
+    }
+
+    impl std::io::Seek for SwitchingReader {
+        fn seek(&mut self, position: SeekFrom) -> std::io::Result<u64> {
+            if matches!(position, SeekFrom::Start(0)) {
+                self.start_seeks += 1;
+                if self.start_seeks == 2 {
+                    self.current = Cursor::new(self.altered_archive.clone());
+                }
+            }
+            self.current.seek(position)
+        }
+    }
+
     #[test]
     fn extracts_verified_files_and_directory_modes_to_empty_staging_root() {
         let temp = TestDirectory::new();
@@ -657,6 +681,33 @@ mod tests {
                 .expect("list stage")
                 .next()
                 .is_none()
+        );
+    }
+
+    #[test]
+    fn cleans_partial_staging_when_archive_changes_after_initial_verification() {
+        let temp = TestDirectory::new();
+        let destination = temp.child("stage");
+        let valid_archive = fixture_archive();
+        let mut altered_archive = valid_archive.clone();
+        let payload_offset = altered_archive.len() - b"native tool bytes".len();
+        altered_archive[payload_offset] ^= 0x01;
+        let mut reader = SwitchingReader {
+            current: Cursor::new(valid_archive),
+            altered_archive,
+            start_seeks: 0,
+        };
+
+        assert!(matches!(
+            extract_archive_to_empty_directory(&mut reader, &destination),
+            Err(ExtractionError::SourceChanged(_))
+        ));
+        assert!(
+            fs::read_dir(destination)
+                .expect("list staging root")
+                .next()
+                .is_none(),
+            "failed extraction must remove paths it created"
         );
     }
 
