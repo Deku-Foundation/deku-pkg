@@ -356,7 +356,9 @@ fn copy_verified_payload<W: Write>(
         path: display_path.clone(),
         message: error.to_string(),
     })?;
-    if metadata.len() != expected_size {
+    if metadata.len() != expected_size
+        || source_mode(&metadata, PackageFileKind::File) != entry.metadata.mode
+    {
         return Err(BuilderError::SourceChanged(display_path.clone()));
     }
 
