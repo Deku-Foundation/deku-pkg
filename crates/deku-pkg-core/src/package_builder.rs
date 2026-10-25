@@ -435,9 +435,9 @@ mod tests {
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            fs::set_permissions(&bin.join("sample"), fs::Permissions::from_mode(0o755))
+            fs::set_permissions(bin.join("sample"), fs::Permissions::from_mode(0o755))
                 .expect("set executable mode");
-            fs::set_permissions(&root.0.join("README"), fs::Permissions::from_mode(0o644))
+            fs::set_permissions(root.0.join("README"), fs::Permissions::from_mode(0o644))
                 .expect("set README mode");
         }
 
