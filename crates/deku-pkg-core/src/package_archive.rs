@@ -93,8 +93,14 @@ pub struct VerifiedArchive {
 pub enum ArchiveError {
     InvalidMagic,
     UnsupportedSchema,
-    ManifestTooLarge { size: usize, limit: usize },
-    ArchiveTooLarge { size: u64, limit: u64 },
+    ManifestTooLarge {
+        size: usize,
+        limit: usize,
+    },
+    ArchiveTooLarge {
+        size: u64,
+        limit: u64,
+    },
     InvalidJson(String),
     InvalidPackageName(String),
     InvalidVersion(String),
@@ -102,18 +108,37 @@ pub enum ArchiveError {
     InvalidAbi,
     InvalidLicense,
     InvalidDependency(String),
-    TooManyDependencies { count: usize, limit: usize },
-    TooManyFiles { count: usize, limit: usize },
+    TooManyDependencies {
+        count: usize,
+        limit: usize,
+    },
+    TooManyFiles {
+        count: usize,
+        limit: usize,
+    },
     InvalidPath(String),
-    InvalidMode { path: String, mode: u32 },
+    InvalidMode {
+        path: String,
+        mode: u32,
+    },
     DuplicatePath(String),
     UnsortedEntries,
     PathTypeConflict(String),
     InvalidEntry(String),
     InvalidDigest(String),
-    PayloadLengthMismatch { declared: u64, computed: u64 },
-    ArchiveLengthMismatch { declared: u64, actual: u64 },
-    DigestMismatch { path: String, expected: String, actual: String },
+    PayloadLengthMismatch {
+        declared: u64,
+        computed: u64,
+    },
+    ArchiveLengthMismatch {
+        declared: u64,
+        actual: u64,
+    },
+    DigestMismatch {
+        path: String,
+        expected: String,
+        actual: String,
+    },
     LengthOverflow,
     ReadError(String),
 }
@@ -374,9 +399,7 @@ pub fn encode_archive(
 
 /// Read an archive without buffering its payload. All file bytes are verified
 /// against the manifest's SHA-256 digests before the manifest is returned.
-pub fn inspect_archive<R: Read + Seek>(
-    reader: &mut R,
-) -> Result<VerifiedArchive, ArchiveError> {
+pub fn inspect_archive<R: Read + Seek>(reader: &mut R) -> Result<VerifiedArchive, ArchiveError> {
     let actual_size = reader
         .seek(SeekFrom::End(0))
         .map_err(|error| ArchiveError::ReadError(error.to_string()))?;
@@ -575,7 +598,10 @@ mod tests {
                     content: Vec::new(),
                 }],
             );
-            assert!(matches!(result, Err(ArchiveError::InvalidPath(_))), "{path}");
+            assert!(
+                matches!(result, Err(ArchiveError::InvalidPath(_))),
+                "{path}"
+            );
         }
     }
 
@@ -669,8 +695,7 @@ mod tests {
             ],
         )
         .expect("encode empty file");
-        let verified =
-            inspect_archive(&mut Cursor::new(bytes)).expect("verify empty file archive");
+        let verified = inspect_archive(&mut Cursor::new(bytes)).expect("verify empty file archive");
         assert_eq!(verified.payload_size, 0);
         assert_eq!(verified.manifest.files.len(), 2);
     }
