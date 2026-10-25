@@ -153,7 +153,6 @@ fn extract_verified<R: Read + Seek>(
 ) -> Result<ExtractionReport, ExtractionError> {
     let manifest = read_and_compare_manifest(reader, verified)?;
     let mut directory_modes = BTreeMap::<String, u32>::new();
-    let mut file_modes = Vec::<(PathBuf, u32)>::new();
 
     // Build directories before payload files. The archive manifest is sorted,
     // but parents may be implicit, so create each path component explicitly.
@@ -242,8 +241,12 @@ fn extract_verified<R: Read + Seek>(
         output
             .sync_all()
             .map_err(|error| io_error("sync staged package file", &output_path, error))?;
+        set_file_mode(&output, entry.mode)
+            .map_err(|error| io_error("apply staged file permissions", &output_path, error))?;
+        output
+            .sync_all()
+            .map_err(|error| io_error("sync staged file permissions", &output_path, error))?;
         drop(output);
-        file_modes.push((output_path, entry.mode));
     }
 
     if payload_total != verified.payload_size {
@@ -277,14 +280,6 @@ fn extract_verified<R: Read + Seek>(
         return Err(ExtractionError::SourceChanged(
             "archive size changed during extraction".to_string(),
         ));
-    }
-
-    for (path, mode) in file_modes {
-        set_mode(&path, mode)
-            .map_err(|error| io_error("apply staged file permissions", &path, error))?;
-        File::open(&path)
-            .and_then(|file| file.sync_all())
-            .map_err(|error| io_error("sync staged file permissions", &path, error))?;
     }
 
     // Deepest-first keeps parents searchable until all child permissions have
@@ -475,6 +470,19 @@ fn io_error(operation: &'static str, path: &Path, error: std::io::Error) -> Extr
         path: path.display().to_string(),
         message: error.to_string(),
     }
+}
+
+#[cfg(unix)]
+fn set_file_mode(file: &File, mode: u32) -> std::io::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    file.set_permissions(fs::Permissions::from_mode(mode))
+}
+
+#[cfg(not(unix))]
+fn set_file_mode(file: &File, mode: u32) -> std::io::Result<()> {
+    let mut permissions = file.metadata()?.permissions();
+    permissions.set_readonly(mode & 0o222 == 0);
+    file.set_permissions(permissions)
 }
 
 #[cfg(unix)]
