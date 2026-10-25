@@ -542,6 +542,12 @@ mod tests {
                 .expect("make corruptible for test");
         }
         fs::write(&stored.path, b"tampered object").expect("tamper test object");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&stored.path, fs::Permissions::from_mode(0o444))
+                .expect("restore immutable mode after test tampering");
+        }
         assert!(matches!(
             store.verify_object(&expected, 1024),
             Err(ContentStoreError::DigestMismatch { .. })
