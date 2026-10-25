@@ -523,8 +523,7 @@ mod tests {
                     #[cfg(not(unix))]
                     fs::write(&self.path, b"modified source bytes").expect("mutate source file");
                 } else {
-                    fs::write(&self.path, b"modified source bytes")
-                        .expect("mutate source file");
+                    fs::write(&self.path, b"modified source bytes").expect("mutate source file");
                 }
                 self.changed = true;
             }
