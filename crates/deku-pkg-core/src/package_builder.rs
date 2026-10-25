@@ -509,7 +509,7 @@ mod tests {
     impl Write for MutatingWriter {
         fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
             if !self.changed {
-                fs::write(&self.path, b"same length mutation").expect("mutate source file");
+                fs::write(&self.path, b"modified source bytes").expect("mutate source file");
                 self.changed = true;
             }
             self.bytes.extend_from_slice(bytes);
