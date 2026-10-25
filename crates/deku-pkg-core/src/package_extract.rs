@@ -359,8 +359,14 @@ fn read_and_compare_manifest<R: Read + Seek>(
     let payload_len = u64::from_be_bytes(header[12..20].try_into().map_err(|_| {
         ExtractionError::SourceChanged("archive payload length changed".to_string())
     })?);
-    if payload_len != verified.payload_size
-        || HEADER_LEN as u64 + manifest_len as u64 + payload_len != verified.archive_size
+    const MAX_MANIFEST_BYTES: usize = 16 * 1024 * 1024;
+    let declared_size = (HEADER_LEN as u64)
+        .checked_add(manifest_len as u64)
+        .and_then(|size| size.checked_add(payload_len));
+    if manifest_len == 0
+        || manifest_len > MAX_MANIFEST_BYTES
+        || payload_len != verified.payload_size
+        || declared_size != Some(verified.archive_size)
     {
         return Err(ExtractionError::SourceChanged(
             "archive framing changed after verification".to_string(),
@@ -708,6 +714,31 @@ mod tests {
                 .next()
                 .is_none(),
             "failed extraction must remove paths it created"
+        );
+    }
+
+    #[test]
+    fn rejects_mutated_header_length_overflow_after_initial_verification() {
+        let temp = TestDirectory::new();
+        let destination = temp.child("stage");
+        let valid_archive = fixture_archive();
+        let mut altered_archive = valid_archive.clone();
+        altered_archive[12..20].copy_from_slice(&u64::MAX.to_be_bytes());
+        let mut reader = SwitchingReader {
+            current: Cursor::new(valid_archive),
+            altered_archive,
+            start_seeks: 0,
+        };
+
+        assert!(matches!(
+            extract_archive_to_empty_directory(&mut reader, &destination),
+            Err(ExtractionError::SourceChanged(_))
+        ));
+        assert!(
+            fs::read_dir(destination)
+                .expect("list staging root")
+                .next()
+                .is_none()
         );
     }
 
