@@ -194,10 +194,9 @@ impl SolverCatalog {
             if !super::valid_digest(&package.artifact.sha256) {
                 return Err(SolverCatalogError::InvalidDigest(package.name.clone()));
             }
-            if let Some(first_package) = artifact_files.insert(
-                package.artifact.file.clone(),
-                package.name.clone(),
-            ) {
+            if let Some(first_package) =
+                artifact_files.insert(package.artifact.file.clone(), package.name.clone())
+            {
                 return Err(SolverCatalogError::DuplicateArtifactFile {
                     file: package.artifact.file.clone(),
                     first_package,
