@@ -16,8 +16,8 @@ This repository is not yet a production package repository. Contributions should
 
 - Use `dev` for integration and validation; use `main` as the reviewed baseline.
 - Run the Rust formatting, Clippy, tests, and package-planner validation on `dev`.
-- Open a pull request from `dev` to `main` only after checks pass.
-- Keep long-lived branches to `main` and `dev`; use a fork for independent contributor work when needed.
+- Maintainers work directly on `dev`, run the package checks, and inspect the diff. Once the required checks pass, fast-forward `main` to the exact `dev` commit.
+- Keep `main` and `dev` as the only persistent repository branches. Do not create in-repository feature branches for routine maintainer work; external contributors can use forks to propose changes for review into `dev`.
 
 The foundation-wide policy is documented in [CONTRIBUTING.md](https://github.com/Deku-Foundation/Deku-Foundation.github.io/blob/main/CONTRIBUTING.md) and [ENGINEERING_WORKFLOW.md](https://github.com/Deku-Foundation/Deku-Foundation.github.io/blob/main/ENGINEERING_WORKFLOW.md).
 
@@ -30,3 +30,7 @@ Reviewers should check licensing, source integrity, patch scope, dependency clos
 ## Release boundary
 
 No package is release-ready until the project has a documented build environment, repository metadata/signing design, update policy, and recovery procedure. Do not publish artifacts from an unreviewed pull request.
+
+## Documentation style
+
+Write for the reader's task. State what is implemented, what has been tested and what remains planned; keep important limitations and translations aligned. Follow the [Deku Foundation technical writing standard](https://github.com/Deku-Foundation/.github/blob/main/EDITORIAL_STYLE.md).
