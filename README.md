@@ -1,6 +1,6 @@
 # Deku Package System
 
-Deku's package system is being developed as a native, Rust-based package manager with explicit package metadata, repository trust, dependency planning and recoverable transactions. The project separates recipe review, build execution, repository publication and client-side installation so that each trust boundary can be tested independently.
+Deku Package System is a prototype for package metadata validation and dependency planning. Its Rust core validates a bounded catalog, orders dependencies deterministically and checks artifact bytes against recorded SHA-256 digests. Repository authentication, package installation and recoverable transactions are not implemented yet.
 
 ## Status
 
