@@ -4,7 +4,7 @@ Deku Package System is a prototype for package metadata validation and dependenc
 
 ## Status
 
-**Experimental prototype — not a production package manager.** The repository has a metadata-only Python plan/catalog prototype and a Rust core that validates a bounded catalog, plans dependency order deterministically and checks artifact bytes against recorded SHA-256 digests. The Rust core does not fetch artifacts, authenticate repository publishers, unpack packages, execute scripts, install software, mutate the host or implement transaction recovery. No production repository or supported system package catalog is available.
+**Experimental prototype — not a production package manager.** The repository has a metadata-only Python plan/catalog prototype and a Rust core that validates a bounded catalog, plans dependency order deterministically and checks artifact bytes against recorded SHA-256 digests. The Rust core does not fetch artifacts, authenticate repository publishers, unpack packages, execute scripts, install software or mutate the host. It models a validated transaction-journal state machine and conservative recovery classification; durable journaling and filesystem recovery remain unimplemented. No production repository or supported system package catalog is available.
 
 ## Current prototype layout
 
